@@ -4,10 +4,15 @@ ESLint plugin to ensure class-validator decorators match TypeScript type annotat
 
 ## Installation
 
+**npm**
+
 ````bash
 npm install --save-dev eslint-plugin-class-validator-type-match
+```
+
+**yarn**
 ```bash
-npm install --save-dev eslint-plugin-class-validator-type-match
+yarn add -D eslint-plugin-class-validator-type-match
 ````
 
 ## Usage
