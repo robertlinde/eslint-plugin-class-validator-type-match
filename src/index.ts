@@ -1,14 +1,14 @@
-import decoratorTypeMatch from "./rules/decorator-type-match";
+import decoratorTypeMatch from './rules/decorator-type-match';
 
 export = {
   rules: {
-    "decorator-type-match": decoratorTypeMatch,
+    'decorator-type-match': decoratorTypeMatch,
   },
   configs: {
     recommended: {
-      plugins: ["class-validator-type-match"],
+      plugins: ['class-validator-type-match'],
       rules: {
-        "class-validator-type-match/decorator-type-match": "error",
+        'class-validator-type-match/decorator-type-match': 'error',
       },
     },
   },

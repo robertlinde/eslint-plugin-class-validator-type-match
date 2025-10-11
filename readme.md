@@ -22,10 +22,10 @@ yarn add -D eslint-plugin-class-validator-type-match
 
 ```javascript
 module.exports = {
-  parser: "@typescript-eslint/parser",
-  plugins: ["class-validator-type-match"],
+  parser: '@typescript-eslint/parser',
+  plugins: ['class-validator-type-match'],
   rules: {
-    "class-validator-type-match/decorator-type-match": "error",
+    'class-validator-type-match/decorator-type-match': 'error',
   },
 };
 ```
@@ -34,8 +34,8 @@ Or use the recommended config:
 
 ```javascript
 module.exports = {
-  parser: "@typescript-eslint/parser",
-  extends: ["plugin:class-validator-type-match/recommended"],
+  parser: '@typescript-eslint/parser',
+  extends: ['plugin:class-validator-type-match/recommended'],
 };
 ```
 
@@ -43,15 +43,15 @@ module.exports = {
 
 ```javascript
 module.exports = {
-  parser: "@typescript-eslint/parser",
-  extends: ["plugin:class-validator-type-match/recommended"],
+  parser: '@typescript-eslint/parser',
+  extends: ['plugin:class-validator-type-match/recommended'],
 };
 ```
 
 ## Example
 
 ```typescript
-import { IsString, IsNumber } from "class-validator";
+import {IsString, IsNumber} from 'class-validator';
 
 class User {
   @IsString()
