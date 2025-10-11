@@ -6,14 +6,15 @@ ESLint plugin to ensure class-validator decorators match TypeScript type annotat
 
 **npm**
 
-````bash
+```bash
 npm install --save-dev eslint-plugin-class-validator-type-match
 ```
 
 **yarn**
+
 ```bash
 yarn add -D eslint-plugin-class-validator-type-match
-````
+```
 
 ## Usage
 
@@ -66,9 +67,9 @@ class User {
 
 ## Supported Decorators
 
-- @IsString → string
-- @IsNumber / @IsInt → number
-- @IsBoolean → boolean
-- @IsArray → array or Array<T>
-- @IsDate → Date
-- @IsObject → object
+- `@IsString` → string
+- `@IsNumber` / `@IsInt` → number
+- `@IsBoolean` → boolean
+- `@IsArray` → array or Array<T>
+- `@IsDate` → Date
+- `@IsObject` → object
