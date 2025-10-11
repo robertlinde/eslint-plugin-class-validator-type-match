@@ -109,7 +109,7 @@ export default createRule<Options, MessageIds>({
 
         /**
          * Extract decorator names from the property.
-         * Handles both @Decorator and @Decorator() syntax.
+         * Handles both @Decorator and @Decorator() syntax for maximum compatibility.
          */
         const decorators = node.decorators
           .filter((d) => d.expression.type === 'CallExpression' || d.expression.type === 'Identifier')
