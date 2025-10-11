@@ -6,9 +6,9 @@ export = {
   },
   configs: {
     recommended: {
-      plugins: ["class-validator-types"],
+      plugins: ["class-validator-type-match"],
       rules: {
-        "class-validator-types/decorator-type-match": "error",
+        "class-validator-type-match/decorator-type-match": "error",
       },
     },
   },

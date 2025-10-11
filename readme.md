@@ -1,12 +1,14 @@
-# eslint-plugin-class-validator-types
+# eslint-plugin-class-validator-type-match
 
 ESLint plugin to ensure class-validator decorators match TypeScript type annotations.
 
 ## Installation
 
+````bash
+npm install --save-dev eslint-plugin-class-validator-type-match
 ```bash
-npm install --save-dev eslint-plugin-class-validator-types
-```
+npm install --save-dev eslint-plugin-class-validator-type-match
+````
 
 ## Usage
 
@@ -15,9 +17,9 @@ npm install --save-dev eslint-plugin-class-validator-types
 ```javascript
 module.exports = {
   parser: "@typescript-eslint/parser",
-  plugins: ["class-validator-types"],
+  plugins: ["class-validator-type-match"],
   rules: {
-    "class-validator-types/decorator-type-match": "error",
+    "class-validator-type-match/decorator-type-match": "error",
   },
 };
 ```
@@ -27,7 +29,16 @@ Or use the recommended config:
 ```javascript
 module.exports = {
   parser: "@typescript-eslint/parser",
-  extends: ["plugin:class-validator-types/recommended"],
+  extends: ["plugin:class-validator-type-match/recommended"],
+};
+```
+
+## Example
+
+```javascript
+module.exports = {
+  parser: "@typescript-eslint/parser",
+  extends: ["plugin:class-validator-type-match/recommended"],
 };
 ```
 
