@@ -1,15 +1,13 @@
-import { ESLintUtils } from "@typescript-eslint/utils";
-import type { TSESTree } from "@typescript-eslint/utils";
+import {ESLintUtils, type TSESTree} from '@typescript-eslint/utils';
 
 /**
  * Creates an ESLint rule with proper documentation URL
  */
 const createRule = ESLintUtils.RuleCreator(
-  (name) =>
-    `https://github.com/robertlinde/eslint-plugin-class-validator-type-match#${name}`
+  (name) => `https://github.com/robertlinde/eslint-plugin-class-validator-type-match#${name}`,
 );
 
-type MessageIds = "mismatch";
+type MessageIds = 'mismatch';
 type Options = [];
 
 /**
@@ -22,35 +20,35 @@ type Options = [];
  */
 const decoratorTypeMap: Record<string, string[]> = {
   // String validators
-  IsString: ["string"],
+  IsString: ['string'],
   IsNotEmpty: [], // Can be any type
 
   // Number validators
-  IsNumber: ["number"],
-  IsInt: ["number"],
-  IsPositive: ["number"],
-  IsNegative: ["number"],
-  Min: ["number"],
-  Max: ["number"],
+  IsNumber: ['number'],
+  IsInt: ['number'],
+  IsPositive: ['number'],
+  IsNegative: ['number'],
+  Min: ['number'],
+  Max: ['number'],
 
   // Boolean validators
-  IsBoolean: ["boolean"],
+  IsBoolean: ['boolean'],
 
   // Date validators
-  IsDate: ["Date"],
-  MinDate: ["Date"],
-  MaxDate: ["Date"],
+  IsDate: ['Date'],
+  MinDate: ['Date'],
+  MaxDate: ['Date'],
 
   // Array validators
-  IsArray: ["array", "Array"],
-  ArrayMinSize: ["array", "Array"],
-  ArrayMaxSize: ["array", "Array"],
+  IsArray: ['array', 'Array'],
+  ArrayMinSize: ['array', 'Array'],
+  ArrayMaxSize: ['array', 'Array'],
 
   // Object validators
-  IsObject: ["object"],
+  IsObject: ['object'],
 
   // Enum validators
-  IsEnum: ["enum"],
+  IsEnum: ['enum'],
 
   // Type-agnostic validators (no type checking)
   IsOptional: [],
@@ -84,17 +82,14 @@ const decoratorTypeMap: Record<string, string[]> = {
  * }
  */
 export default createRule<Options, MessageIds>({
-  name: "decorator-type-match",
+  name: 'decorator-type-match',
   meta: {
-    type: "problem",
+    type: 'problem',
     docs: {
-      description:
-        "Ensure class-validator decorators match TypeScript type annotations",
-      recommended: "recommended",
+      description: 'Ensure class-validator decorators match TypeScript type annotations',
     },
     messages: {
-      mismatch:
-        "Decorator @{{decorator}} does not match type annotation {{actualType}}. Expected: {{expectedTypes}}",
+      mismatch: 'Decorator @{{decorator}} does not match type annotation {{actualType}}. Expected: {{expectedTypes}}',
     },
     schema: [],
   },
@@ -113,47 +108,63 @@ export default createRule<Options, MessageIds>({
 
         /**
          * Extract decorator names from the property.
-         * Handles both @Decorator and @Decorator() syntax.
+         * Handles both @Decorator and @Decorator() syntax for maximum compatibility.
          */
         const decorators = node.decorators
-          .filter(
-            (d) =>
-              d.expression.type === "CallExpression" ||
-              d.expression.type === "Identifier"
-          )
+          .filter((d) => d.expression.type === 'CallExpression' || d.expression.type === 'Identifier')
           .map((d) => {
-            if (
-              d.expression.type === "CallExpression" &&
-              d.expression.callee.type === "Identifier"
-            ) {
+            if (d.expression.type === 'CallExpression' && d.expression.callee.type === 'Identifier') {
               return d.expression.callee.name;
             }
-            if (d.expression.type === "Identifier") {
+
+            if (d.expression.type === 'Identifier') {
               return d.expression.name;
             }
+
             return null;
           })
           .filter((name): name is string => name !== null);
 
-        const typeAnnotation = node.typeAnnotation.typeAnnotation;
+        const {typeAnnotation} = node.typeAnnotation;
         let actualType: string | null = null;
 
         /**
          * Determine the actual TypeScript type from the annotation.
          * Supports primitive types, arrays, and type references.
          */
-        if (typeAnnotation.type === "TSStringKeyword") {
-          actualType = "string";
-        } else if (typeAnnotation.type === "TSNumberKeyword") {
-          actualType = "number";
-        } else if (typeAnnotation.type === "TSBooleanKeyword") {
-          actualType = "boolean";
-        } else if (typeAnnotation.type === "TSArrayType") {
-          actualType = "array";
-        } else if (typeAnnotation.type === "TSTypeReference") {
-          if (typeAnnotation.typeName.type === "Identifier") {
-            actualType = typeAnnotation.typeName.name;
+        switch (typeAnnotation.type) {
+          case 'TSStringKeyword': {
+            actualType = 'string';
+
+            break;
           }
+
+          case 'TSNumberKeyword': {
+            actualType = 'number';
+
+            break;
+          }
+
+          case 'TSBooleanKeyword': {
+            actualType = 'boolean';
+
+            break;
+          }
+
+          case 'TSArrayType': {
+            actualType = 'array';
+
+            break;
+          }
+
+          case 'TSTypeReference': {
+            if (typeAnnotation.typeName.type === 'Identifier') {
+              actualType = typeAnnotation.typeName.name;
+            }
+
+            break;
+          }
+          // No default
         }
 
         // Skip if we couldn't determine the type
@@ -176,20 +187,20 @@ export default createRule<Options, MessageIds>({
            * Handles both 'array' and 'Array' as equivalent.
            */
           const matches = expectedTypes.some((expected) => {
-            if (expected === "array" && actualType === "Array") return true;
-            if (expected === "Array" && actualType === "array") return true;
+            if (expected === 'array' && actualType === 'Array') return true;
+            if (expected === 'Array' && actualType === 'array') return true;
             return expected === actualType;
           });
 
           // Report mismatch
           if (!matches) {
             context.report({
-              node: node,
-              messageId: "mismatch",
+              node,
+              messageId: 'mismatch',
               data: {
                 decorator,
                 actualType,
-                expectedTypes: expectedTypes.join(" or "),
+                expectedTypes: expectedTypes.join(' or '),
               },
             });
           }
