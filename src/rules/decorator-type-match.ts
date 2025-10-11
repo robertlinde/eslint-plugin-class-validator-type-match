@@ -87,7 +87,6 @@ export default createRule<Options, MessageIds>({
     type: 'problem',
     docs: {
       description: 'Ensure class-validator decorators match TypeScript type annotations',
-      recommended: 'recommended',
     },
     messages: {
       mismatch: 'Decorator @{{decorator}} does not match type annotation {{actualType}}. Expected: {{expectedTypes}}',
