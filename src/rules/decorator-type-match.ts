@@ -7,7 +7,7 @@ const createRule = ESLintUtils.RuleCreator(
   (name) => `https://github.com/robertlinde/eslint-plugin-class-validator-type-match#${name}`,
 );
 
-type MessageIds = 'mismatch' | 'nestedArrayMismatch' | 'missingValidateNested' | 'enumMismatch';
+type MessageIds = 'mismatch' | 'nestedArrayMismatch' | 'missingValidateNested' | 'enumMismatch' | 'typeMismatch';
 type Options = [];
 
 /**
@@ -233,6 +233,34 @@ function getIsEnumArgument(decorator: TSESTree.Decorator): string | null {
 }
 
 /**
+ * Extract the class name from @Type(() => ClassName) decorator
+ */
+function getTypeDecoratorClassName(decorator: TSESTree.Decorator): string | null {
+  if (decorator.expression.type === 'CallExpression' && decorator.expression.arguments.length > 0) {
+    const firstArg = decorator.expression.arguments[0];
+
+    // Handle arrow function: () => ClassName
+    if (firstArg.type === 'ArrowFunctionExpression' && firstArg.body.type === 'Identifier') {
+      return firstArg.body.name;
+    }
+
+    // Handle function expression: function() { return ClassName; }
+    if (
+      firstArg.type === 'FunctionExpression' &&
+      firstArg.body.type === 'BlockStatement' &&
+      firstArg.body.body.length > 0
+    ) {
+      const returnStmt = firstArg.body.body[0];
+      if (returnStmt.type === 'ReturnStatement' && returnStmt.argument?.type === 'Identifier') {
+        return returnStmt.argument.name;
+      }
+    }
+  }
+
+  return null;
+}
+
+/**
  * Check if decorator and type match, with special handling for @IsEnum
  */
 function checkTypeMatch(decorator: string, typeAnnotation: TSESTree.TypeNode, actualType: string): boolean {
@@ -279,6 +307,7 @@ function checkTypeMatch(decorator: string, typeAnnotation: TSESTree.TypeNode, ac
  * - Enum types (both TypeScript enums and union types)
  * - Literal types (e.g., "admin", 25)
  * - Intersection types (e.g., Profile & Settings)
+ * - @Type(() => ClassName) decorator matching
  *
  * @example
  * // ❌ Bad - will trigger error
@@ -292,6 +321,22 @@ function checkTypeMatch(decorator: string, typeAnnotation: TSESTree.TypeNode, ac
  * class User {
  *   @IsString()
  *   name!: string;
+ * }
+ *
+ * @example
+ * // ❌ Bad - @Type doesn't match TypeScript type
+ * class User {
+ *   @ValidateNested()
+ *   @Type(() => Address)
+ *   address: string;
+ * }
+ *
+ * @example
+ * // ✅ Good - @Type matches TypeScript type
+ * class User {
+ *   @ValidateNested()
+ *   @Type(() => Address)
+ *   address: Address;
  * }
  *
  * @example
@@ -380,7 +425,7 @@ export default createRule<Options, MessageIds>({
     type: 'problem',
     docs: {
       description:
-        'Ensure class-validator decorators match TypeScript type annotations, including arrays of objects, nested objects, enum types, literal types, and intersection types',
+        'Ensure class-validator decorators match TypeScript type annotations, including arrays of objects, nested objects, enum types, literal types, intersection types, and @Type decorator matching',
     },
     messages: {
       mismatch: 'Decorator @{{decorator}} does not match type annotation {{actualType}}. Expected: {{expectedTypes}}',
@@ -389,6 +434,7 @@ export default createRule<Options, MessageIds>({
       missingValidateNested: 'Complex type {{actualType}} requires @ValidateNested() decorator for proper validation.',
       enumMismatch:
         '@IsEnum({{enumArg}}) does not match type annotation {{actualType}}. Ensure the enum argument matches the type.',
+      typeMismatch: '@Type(() => {{typeDecoratorClass}}) does not match type annotation {{actualType}}.',
     },
     schema: [],
   },
@@ -461,6 +507,80 @@ export default createRule<Options, MessageIds>({
                   actualType: typeAnnotation.typeName.name,
                 },
               });
+            }
+          }
+        }
+
+        // Check for @Type(() => ClassName) mismatch with TypeScript type
+        const typeDecorator = node.decorators?.find(
+          (d) =>
+            d.expression.type === 'CallExpression' &&
+            d.expression.callee.type === 'Identifier' &&
+            d.expression.callee.name === 'Type',
+        );
+
+        if (typeDecorator) {
+          const typeClassName = getTypeDecoratorClassName(typeDecorator);
+
+          // For non-array types, check if @Type matches the TypeScript type
+          if (typeClassName && !isArrayType(typeAnnotation)) {
+            if (typeAnnotation.type === 'TSTypeReference' && typeAnnotation.typeName.type === 'Identifier') {
+              const tsTypeName = typeAnnotation.typeName.name;
+
+              if (typeClassName !== tsTypeName) {
+                context.report({
+                  node,
+                  messageId: 'typeMismatch',
+                  data: {
+                    typeDecoratorClass: typeClassName,
+                    actualType: tsTypeName,
+                  },
+                });
+              }
+            } else if (typeAnnotation.type !== 'TSTypeReference') {
+              // @Type is used with a primitive type
+              context.report({
+                node,
+                messageId: 'typeMismatch',
+                data: {
+                  typeDecoratorClass: typeClassName,
+                  actualType,
+                },
+              });
+            }
+          }
+
+          // For array types, check if @Type matches the array element type
+          if (typeClassName && isArrayType(typeAnnotation)) {
+            const elementTypeNode = getArrayElementTypeNode(typeAnnotation);
+            if (elementTypeNode) {
+              if (elementTypeNode.type === 'TSTypeReference' && elementTypeNode.typeName.type === 'Identifier') {
+                const elementTypeName = elementTypeNode.typeName.name;
+
+                if (typeClassName !== elementTypeName) {
+                  context.report({
+                    node,
+                    messageId: 'typeMismatch',
+                    data: {
+                      typeDecoratorClass: typeClassName,
+                      actualType: `${elementTypeName}[]`,
+                    },
+                  });
+                }
+              } else {
+                // @Type is used with an array of primitives
+                const elementType = getTypeString(elementTypeNode);
+                if (elementType) {
+                  context.report({
+                    node,
+                    messageId: 'typeMismatch',
+                    data: {
+                      typeDecoratorClass: typeClassName,
+                      actualType: `${elementType}[]`,
+                    },
+                  });
+                }
+              }
             }
           }
         }
