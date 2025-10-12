@@ -7,7 +7,13 @@ const createRule = ESLintUtils.RuleCreator(
   (name) => `https://github.com/robertlinde/eslint-plugin-class-validator-type-match#${name}`,
 );
 
-type MessageIds = 'mismatch' | 'nestedArrayMismatch' | 'missingValidateNested' | 'enumMismatch' | 'typeMismatch';
+type MessageIds =
+  | 'mismatch'
+  | 'nestedArrayMismatch'
+  | 'missingValidateNested'
+  | 'enumMismatch'
+  | 'typeMismatch'
+  | 'missingEachOption';
 type Options = [];
 
 /**
@@ -70,10 +76,66 @@ const decoratorTypeMap: Record<string, string[]> = {
 };
 
 /**
- * Convert a TypeNode to a string representation
+ * Removes readonly type operator to access the underlying type.
+ * Other type operators like keyof and unique are preserved.
+ */
+function unwrapReadonlyOperator(typeNode: TSESTree.TypeNode): TSESTree.TypeNode {
+  let current = typeNode;
+  while (current.type === 'TSTypeOperator' && current.operator === 'readonly') {
+    // TSTypeOperator always has a typeAnnotation, but TypeScript types it as possibly undefined
+    if (!current.typeAnnotation) {
+      break;
+    }
+    current = current.typeAnnotation;
+  }
+  return current;
+}
+
+/**
+ * Determines if a union type represents a nullable value (T | null | undefined)
+ * where T is a single non-null/undefined type.
+ *
+ * @returns Object indicating if the union is nullable and what the base type is
+ */
+function isNullableUnion(typeNode: TSESTree.TypeNode): {isNullable: boolean; baseType: TSESTree.TypeNode | null} {
+  if (typeNode.type !== 'TSUnionType') {
+    return {isNullable: false, baseType: null};
+  }
+
+  let baseType: TSESTree.TypeNode | null = null;
+  let hasNull = false;
+  let hasUndefined = false;
+
+  for (const type of typeNode.types) {
+    if (type.type === 'TSNullKeyword') {
+      hasNull = true;
+    } else if (type.type === 'TSUndefinedKeyword') {
+      hasUndefined = true;
+    } else if (baseType === null) {
+      baseType = type;
+    } else {
+      // More than one non-null/undefined type, not a simple nullable union
+      return {isNullable: false, baseType: null};
+    }
+  }
+
+  // Must have exactly one base type and at least one null/undefined
+  if (baseType && (hasNull || hasUndefined)) {
+    return {isNullable: true, baseType};
+  }
+
+  return {isNullable: false, baseType: null};
+}
+
+/**
+ * Converts a TypeScript type node to its string representation for validation purposes.
+ * Handles primitives, arrays, tuples, type references, literals, unions, and intersections.
+ * Returns null for types that cannot be validated.
  */
 function getTypeString(typeNode: TSESTree.TypeNode): string | null {
-  switch (typeNode.type) {
+  const unwrapped = unwrapReadonlyOperator(typeNode);
+
+  switch (unwrapped.type) {
     case 'TSStringKeyword':
       return 'string';
     case 'TSNumberKeyword':
@@ -82,9 +144,11 @@ function getTypeString(typeNode: TSESTree.TypeNode): string | null {
       return 'boolean';
     case 'TSArrayType':
       return 'array';
+    case 'TSTupleType':
+      return 'array';
     case 'TSTypeReference':
-      if (typeNode.typeName.type === 'Identifier') {
-        return typeNode.typeName.name;
+      if (unwrapped.typeName.type === 'Identifier') {
+        return unwrapped.typeName.name;
       }
       break;
     case 'TSTypeLiteral':
@@ -92,11 +156,10 @@ function getTypeString(typeNode: TSESTree.TypeNode): string | null {
     case 'TSUnionType':
       return 'union';
     case 'TSLiteralType':
-      // Handle literal types like 25 or "hello"
-      if (typeNode.literal.type === 'Literal') {
-        if (typeof typeNode.literal.value === 'string') return 'string';
-        if (typeof typeNode.literal.value === 'number') return 'number';
-        if (typeof typeNode.literal.value === 'boolean') return 'boolean';
+      if (unwrapped.literal.type === 'Literal') {
+        if (typeof unwrapped.literal.value === 'string') return 'string';
+        if (typeof unwrapped.literal.value === 'number') return 'number';
+        if (typeof unwrapped.literal.value === 'boolean') return 'boolean';
       }
       return 'literal';
     case 'TSIntersectionType':
@@ -106,29 +169,39 @@ function getTypeString(typeNode: TSESTree.TypeNode): string | null {
 }
 
 /**
- * Extract the element type node from an array type annotation
+ * Extracts the element type from an array type annotation.
+ * Supports T[] and Array<T> syntax.
+ * Returns null for tuple types since they don't have a single element type.
  */
 function getArrayElementTypeNode(typeAnnotation: TSESTree.TypeNode): TSESTree.TypeNode | null {
+  const unwrapped = unwrapReadonlyOperator(typeAnnotation);
+
   // Handle Type[] syntax
-  if (typeAnnotation.type === 'TSArrayType') {
-    return typeAnnotation.elementType;
+  if (unwrapped.type === 'TSArrayType') {
+    return unwrapped.elementType;
   }
 
   // Handle Array<Type> syntax
   if (
-    typeAnnotation.type === 'TSTypeReference' &&
-    typeAnnotation.typeName.type === 'Identifier' &&
-    typeAnnotation.typeName.name === 'Array' &&
-    typeAnnotation.typeArguments?.params[0]
+    unwrapped.type === 'TSTypeReference' &&
+    unwrapped.typeName.type === 'Identifier' &&
+    unwrapped.typeName.name === 'Array' &&
+    unwrapped.typeArguments?.params[0]
   ) {
-    return typeAnnotation.typeArguments.params[0];
+    return unwrapped.typeArguments.params[0];
+  }
+
+  // Tuples don't have a single element type to validate
+  if (unwrapped.type === 'TSTupleType') {
+    return null;
   }
 
   return null;
 }
 
 /**
- * Check if a type annotation is a union type of literals
+ * Checks if a type is a union of literal types (e.g., 'active' | 'inactive').
+ * These are typically used for enum-like type definitions.
  */
 function isUnionOfLiterals(typeNode: TSESTree.TypeNode): boolean {
   if (typeNode.type === 'TSUnionType') {
@@ -138,31 +211,45 @@ function isUnionOfLiterals(typeNode: TSESTree.TypeNode): boolean {
 }
 
 /**
- * Check if a type is a complex type (object, class instance, or type literal)
- * Excludes union types of literals which are typically used for enum-like types
+ * Determines if a type requires @ValidateNested decorator for proper validation.
+ * Complex types include objects, class instances, type literals, and intersections.
+ * Built-in types with complex generic parameters are also considered complex.
  */
 function isComplexType(typeNode: TSESTree.TypeNode): boolean {
+  const unwrapped = unwrapReadonlyOperator(typeNode);
+
   // Type literals are always complex
-  if (typeNode.type === 'TSTypeLiteral') {
+  if (unwrapped.type === 'TSTypeLiteral') {
     return true;
   }
 
   // Union types of literals are not complex (they're enum-like)
-  if (isUnionOfLiterals(typeNode)) {
+  if (isUnionOfLiterals(unwrapped)) {
     return false;
   }
 
   // Intersection types are complex
-  if (typeNode.type === 'TSIntersectionType') {
+  if (unwrapped.type === 'TSIntersectionType') {
     return true;
   }
 
   // Check for type references (class names, interfaces, etc.)
-  if (typeNode.type === 'TSTypeReference' && typeNode.typeName.type === 'Identifier') {
-    const typeName = typeNode.typeName.name;
+  if (unwrapped.type === 'TSTypeReference' && unwrapped.typeName.type === 'Identifier') {
+    const typeName = unwrapped.typeName.name;
     // Common built-in types that don't require @ValidateNested
     // This list focuses on types commonly used in validation contexts
     const builtInTypes = ['String', 'Number', 'Boolean', 'Date', 'Array', 'Promise', 'Map', 'Set'];
+
+    // Built-in types with complex generic parameters are considered complex
+    if (builtInTypes.includes(typeName) && unwrapped.typeArguments?.params) {
+      for (const param of unwrapped.typeArguments.params) {
+        if (isComplexType(param)) {
+          return true;
+        }
+      }
+      return false;
+    }
+
     return !builtInTypes.includes(typeName);
   }
 
@@ -170,18 +257,25 @@ function isComplexType(typeNode: TSESTree.TypeNode): boolean {
 }
 
 /**
- * Check if a type annotation represents an array
+ * Checks if a type represents an array.
+ * Handles T[], Array<T>, and tuple types.
  */
 function isArrayType(typeAnnotation: TSESTree.TypeNode): boolean {
-  if (typeAnnotation.type === 'TSArrayType') {
+  const unwrapped = unwrapReadonlyOperator(typeAnnotation);
+
+  if (unwrapped.type === 'TSArrayType') {
     return true;
   }
 
   if (
-    typeAnnotation.type === 'TSTypeReference' &&
-    typeAnnotation.typeName.type === 'Identifier' &&
-    typeAnnotation.typeName.name === 'Array'
+    unwrapped.type === 'TSTypeReference' &&
+    unwrapped.typeName.type === 'Identifier' &&
+    unwrapped.typeName.name === 'Array'
   ) {
+    return true;
+  }
+
+  if (unwrapped.type === 'TSTupleType') {
     return true;
   }
 
@@ -189,15 +283,15 @@ function isArrayType(typeAnnotation: TSESTree.TypeNode): boolean {
 }
 
 /**
- * Check if a type annotation is a union type of literals (enum-like)
- * Used for @IsEnum validation
+ * Checks if a type is a union of literals, used for enum-like type definitions.
  */
 function isUnionEnumType(typeNode: TSESTree.TypeNode): boolean {
   return isUnionOfLiterals(typeNode);
 }
 
 /**
- * Extract the first argument from @IsEnum() decorator
+ * Extracts the enum reference from @IsEnum() decorator argument.
+ * Handles both simple identifiers (MyEnum) and member expressions (MyNamespace.MyEnum).
  */
 function getIsEnumArgument(decorator: TSESTree.Decorator): string | null {
   if (decorator.expression.type === 'CallExpression' && decorator.expression.arguments.length > 0) {
@@ -233,7 +327,8 @@ function getIsEnumArgument(decorator: TSESTree.Decorator): string | null {
 }
 
 /**
- * Extract the class name from @Type(() => ClassName) decorator
+ * Extracts the class name from @Type(() => ClassName) decorator.
+ * Supports both arrow functions and function expressions.
  */
 function getTypeDecoratorClassName(decorator: TSESTree.Decorator): string | null {
   if (decorator.expression.type === 'CallExpression' && decorator.expression.arguments.length > 0) {
@@ -261,7 +356,39 @@ function getTypeDecoratorClassName(decorator: TSESTree.Decorator): string | null
 }
 
 /**
- * Check if decorator and type match, with special handling for @IsEnum
+ * Checks if @ValidateNested decorator includes the { each: true } option.
+ * Returns false for decorators without parentheses or without the each option.
+ */
+function hasValidateNestedEachOption(decorator: TSESTree.Decorator): boolean {
+  // If decorator is used without parentheses (e.g., @ValidateNested), it has no options
+  if (decorator.expression.type === 'Identifier') {
+    return false;
+  }
+
+  if (decorator.expression.type === 'CallExpression' && decorator.expression.arguments.length > 0) {
+    const firstArg = decorator.expression.arguments[0];
+
+    if (firstArg.type === 'ObjectExpression') {
+      return firstArg.properties.some((prop) => {
+        if (
+          prop.type === 'Property' &&
+          prop.key.type === 'Identifier' &&
+          prop.key.name === 'each' &&
+          prop.value.type === 'Literal'
+        ) {
+          return prop.value.value === true;
+        }
+        return false;
+      });
+    }
+  }
+
+  return false;
+}
+
+/**
+ * Validates if a decorator matches the TypeScript type annotation.
+ * Handles special cases like @IsEnum validation and nullable unions.
  */
 function checkTypeMatch(decorator: string, typeAnnotation: TSESTree.TypeNode, actualType: string): boolean {
   const expectedTypes = decoratorTypeMap[decorator];
@@ -283,6 +410,19 @@ function checkTypeMatch(decorator: string, typeAnnotation: TSESTree.TypeNode, ac
       return expectedTypes.includes('type-reference');
     }
     return false;
+  }
+
+  // For nullable unions (T | null | undefined), validate against the base type
+  const nullableCheck = isNullableUnion(typeAnnotation);
+  if (nullableCheck.isNullable && nullableCheck.baseType) {
+    const baseTypeString = getTypeString(nullableCheck.baseType);
+    if (baseTypeString) {
+      return expectedTypes.some((expected) => {
+        if (expected === 'array' && baseTypeString === 'Array') return true;
+        if (expected === 'Array' && baseTypeString === 'array') return true;
+        return expected === baseTypeString;
+      });
+    }
   }
 
   // Standard type matching
@@ -308,6 +448,9 @@ function checkTypeMatch(decorator: string, typeAnnotation: TSESTree.TypeNode, ac
  * - Literal types (e.g., "admin", 25)
  * - Intersection types (e.g., Profile & Settings)
  * - @Type(() => ClassName) decorator matching
+ * - Readonly arrays (readonly T[])
+ * - Tuple types ([T, U])
+ * - Nullable unions (T | null | undefined)
  *
  * @example
  * // ❌ Bad - will trigger error
@@ -418,6 +561,29 @@ function checkTypeMatch(decorator: string, typeAnnotation: TSESTree.TypeNode, ac
  *   @IsString()
  *   status!: UserStatus;  // Should use @IsEnum, will report type mismatch
  * }
+ *
+ * @example
+ * // ✅ Good - nullable union with @IsOptional
+ * class User {
+ *   @IsOptional()
+ *   @IsString()
+ *   name!: string | null;
+ * }
+ *
+ * @example
+ * // ✅ Good - readonly array
+ * class User {
+ *   @IsArray()
+ *   @ValidateNested({ each: true })
+ *   addresses!: readonly Address[];
+ * }
+ *
+ * @example
+ * // ✅ Good - tuple type
+ * class User {
+ *   @IsArray()
+ *   coords!: [number, number];
+ * }
  */
 export default createRule<Options, MessageIds>({
   name: 'decorator-type-match',
@@ -425,7 +591,7 @@ export default createRule<Options, MessageIds>({
     type: 'problem',
     docs: {
       description:
-        'Ensure class-validator decorators match TypeScript type annotations, including arrays of objects, nested objects, enum types, literal types, intersection types, and @Type decorator matching',
+        'Ensure class-validator decorators match TypeScript type annotations, including arrays of objects, nested objects, enum types, literal types, intersection types, readonly arrays, tuple types, nullable unions, and @Type decorator matching',
     },
     messages: {
       mismatch: 'Decorator @{{decorator}} does not match type annotation {{actualType}}. Expected: {{expectedTypes}}',
@@ -435,6 +601,8 @@ export default createRule<Options, MessageIds>({
       enumMismatch:
         '@IsEnum({{enumArg}}) does not match type annotation {{actualType}}. Ensure the enum argument matches the type.',
       typeMismatch: '@Type(() => {{typeDecoratorClass}}) does not match type annotation {{actualType}}.',
+      missingEachOption:
+        'Array of complex types requires @ValidateNested({ each: true }), but only @ValidateNested() was found.',
     },
     schema: [],
   },
@@ -442,8 +610,7 @@ export default createRule<Options, MessageIds>({
   create(context) {
     return {
       /**
-       * Analyzes class property definitions to check if decorators match type annotations
-       * @param node - The PropertyDefinition AST node to analyze
+       * Analyzes class property definitions to validate decorator and type annotation matching
        */
       PropertyDefinition(node: TSESTree.PropertyDefinition) {
         // Skip if no decorators present
@@ -485,7 +652,7 @@ export default createRule<Options, MessageIds>({
         const hasValidateNested = decorators.includes('ValidateNested');
         const hasIsEnum = decorators.includes('IsEnum');
 
-        // Check for @IsEnum with type reference (enum) - validate the argument matches
+        // Validate @IsEnum argument matches the type annotation for enum type references
         if (hasIsEnum && typeAnnotation.type === 'TSTypeReference' && typeAnnotation.typeName.type === 'Identifier') {
           const isEnumDecorator = node.decorators?.find(
             (d) =>
@@ -511,7 +678,7 @@ export default createRule<Options, MessageIds>({
           }
         }
 
-        // Check for @Type(() => ClassName) mismatch with TypeScript type
+        // Validate @Type(() => ClassName) matches the TypeScript type annotation
         const typeDecorator = node.decorators?.find(
           (d) =>
             d.expression.type === 'CallExpression' &&
@@ -585,10 +752,11 @@ export default createRule<Options, MessageIds>({
           }
         }
 
-        // Check for arrays of complex types
+        // Validate arrays of complex types have proper nested validation
         if (isArrayType(typeAnnotation)) {
           const elementTypeNode = getArrayElementTypeNode(typeAnnotation);
 
+          // Tuples return null for elementTypeNode, skip nested validation check
           if (elementTypeNode && isComplexType(elementTypeNode)) {
             const elementTypeName = getTypeString(elementTypeNode);
 
@@ -600,13 +768,35 @@ export default createRule<Options, MessageIds>({
                   elementType: elementTypeName,
                 },
               });
+            } else if (hasValidateNested && elementTypeName) {
+              // Validate { each: true } option is present for array nested validation
+              const validateNestedDecorator = node.decorators?.find((d) => {
+                if (d.expression.type === 'Identifier' && d.expression.name === 'ValidateNested') {
+                  return true;
+                }
+                if (
+                  d.expression.type === 'CallExpression' &&
+                  d.expression.callee.type === 'Identifier' &&
+                  d.expression.callee.name === 'ValidateNested'
+                ) {
+                  return true;
+                }
+                return false;
+              });
+
+              if (validateNestedDecorator && !hasValidateNestedEachOption(validateNestedDecorator)) {
+                context.report({
+                  node,
+                  messageId: 'missingEachOption',
+                  data: {},
+                });
+              }
             }
           }
         }
 
         /**
-         * Check each decorator against the actual type.
-         * Report an error if there's a mismatch.
+         * Validate each type-enforcing decorator matches the actual type
          */
         for (const decorator of decorators) {
           // Skip type-agnostic decorators
@@ -629,7 +819,7 @@ export default createRule<Options, MessageIds>({
           }
         }
 
-        // Check for complex object types (not arrays) needing @ValidateNested
+        // Validate complex object types have @ValidateNested decorator
         const hasTypedDecorator = decorators.some((d) => !TYPE_AGNOSTIC_DECORATORS.has(d) && decoratorTypeMap[d]);
 
         if (!isArrayType(typeAnnotation) && isComplexType(typeAnnotation) && !hasTypedDecorator) {
