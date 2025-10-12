@@ -11,17 +11,35 @@ type MessageIds = 'mismatch' | 'nestedArrayMismatch' | 'missingValidateNested' |
 type Options = [];
 
 /**
+ * Decorators that don't enforce specific types and can work with any type.
+ * These are used for validation logic rather than type checking.
+ */
+const TYPE_AGNOSTIC_DECORATORS = new Set([
+  'IsOptional',
+  'ValidateNested',
+  'IsDefined',
+  'IsEmpty',
+  'Equals',
+  'NotEquals',
+  'IsIn',
+  'IsNotIn',
+  'Type',
+  'Exclude',
+  'Expose',
+  'Transform',
+]);
+
+/**
  * Mapping of class-validator decorators to their expected TypeScript types.
- * Empty arrays indicate decorators that can accept any type.
+ * Only includes decorators that enforce specific types.
  *
  * @example
  * IsString: ["string"] - expects string type
- * IsOptional: [] - accepts any type
  */
 const decoratorTypeMap: Record<string, string[]> = {
   // String validators
   IsString: ['string'],
-  IsNotEmpty: [], // Can be any type
+  IsNotEmpty: [], // Can be any type, but kept for backward compatibility
 
   // Number validators
   IsNumber: ['number'],
@@ -47,24 +65,8 @@ const decoratorTypeMap: Record<string, string[]> = {
   // Object validators
   IsObject: ['object'],
 
-  // Enum validators
-  IsEnum: ['enum'],
-
-  // Type-agnostic validators (no type checking)
-  IsOptional: [],
-  ValidateNested: [],
-  IsDefined: [],
-  IsEmpty: [],
-  Equals: [],
-  NotEquals: [],
-  IsIn: [],
-  IsNotIn: [],
-
-  // class-transformer decorators (type-agnostic)
-  Type: [],
-  Exclude: [],
-  Expose: [],
-  Transform: [],
+  // Enum validators - special handling for union types and enum references
+  IsEnum: ['enum', 'union-literal', 'type-reference'],
 };
 
 /**
@@ -227,6 +229,39 @@ function getIsEnumArgument(decorator: TSESTree.Decorator): string | null {
   }
 
   return null;
+}
+
+/**
+ * Check if decorator and type match, with special handling for @IsEnum
+ */
+function checkTypeMatch(decorator: string, typeAnnotation: TSESTree.TypeNode, actualType: string): boolean {
+  const expectedTypes = decoratorTypeMap[decorator];
+
+  // Skip decorators not in our map or type-agnostic ones
+  if (!expectedTypes || expectedTypes.length === 0) {
+    return true;
+  }
+
+  // Special handling for @IsEnum
+  if (decorator === 'IsEnum') {
+    // @IsEnum should work with:
+    // 1. Union types of literals: 'active' | 'inactive' -> 'union-literal'
+    // 2. Type references (assumed to be enums): UserStatus -> 'type-reference'
+    if (isUnionEnumType(typeAnnotation)) {
+      return expectedTypes.includes('union-literal');
+    }
+    if (typeAnnotation.type === 'TSTypeReference' && typeAnnotation.typeName.type === 'Identifier') {
+      return expectedTypes.includes('type-reference');
+    }
+    return false;
+  }
+
+  // Standard type matching
+  return expectedTypes.some((expected) => {
+    if (expected === 'array' && actualType === 'Array') return true;
+    if (expected === 'Array' && actualType === 'array') return true;
+    return expected === actualType;
+  });
 }
 
 /**
@@ -453,62 +488,32 @@ export default createRule<Options, MessageIds>({
          * Report an error if there's a mismatch.
          */
         for (const decorator of decorators) {
-          const expectedTypes = decoratorTypeMap[decorator];
+          // Skip type-agnostic decorators
+          if (TYPE_AGNOSTIC_DECORATORS.has(decorator)) continue;
 
-          // Skip decorators not in our map
-          if (!expectedTypes) continue;
-          // Skip type-agnostic decorators (empty array)
-          if (expectedTypes.length === 0) continue;
-
-          /**
-           * Check if the actual type matches any of the expected types.
-           * Handles both 'array' and 'Array' as equivalent.
-           * Special handling for @IsEnum decorator.
-           */
-          let matches = false;
-
-          if (decorator === 'IsEnum') {
-            // @IsEnum should work with:
-            // 1. Union types of literals: 'active' | 'inactive'
-            // 2. Type references (assumed to be enums): UserStatus
-            matches =
-              isUnionEnumType(typeAnnotation) ||
-              (typeAnnotation.type === 'TSTypeReference' && typeAnnotation.typeName.type === 'Identifier');
-          } else {
-            matches = expectedTypes.some((expected) => {
-              if (expected === 'array' && actualType === 'Array') return true;
-              if (expected === 'Array' && actualType === 'array') return true;
-              return expected === actualType;
-            });
-          }
+          const matches = checkTypeMatch(decorator, typeAnnotation, actualType);
 
           // Report mismatch
           if (!matches) {
+            const expectedTypes = decoratorTypeMap[decorator];
             context.report({
               node,
               messageId: 'mismatch',
               data: {
                 decorator,
                 actualType,
-                expectedTypes: expectedTypes.join(' or '),
+                expectedTypes: expectedTypes?.join(' or ') || 'unknown',
               },
             });
           }
         }
 
         // Check for complex object types (not arrays) needing @ValidateNested
-        // Skip this check if there are type-specific decorators (they'll report their own mismatches)
-        const hasTypedDecorator = decorators.some((d) => {
-          const expectedTypes = decoratorTypeMap[d];
-          return expectedTypes && expectedTypes.length > 0;
-        });
+        const hasTypedDecorator = decorators.some((d) => !TYPE_AGNOSTIC_DECORATORS.has(d) && decoratorTypeMap[d]);
 
         if (!isArrayType(typeAnnotation) && isComplexType(typeAnnotation) && !hasTypedDecorator) {
           // Complex types should have @ValidateNested()
-          // Only skip the check if there are ONLY @IsOptional decorators (no other validation)
-          const hasOnlyIsOptional = decorators.length > 0 && decorators.every((name) => name === 'IsOptional');
-
-          if (!hasValidateNested && !hasOnlyIsOptional && decorators.length > 0) {
+          if (!hasValidateNested && decorators.length > 0) {
             context.report({
               node,
               messageId: 'missingValidateNested',
