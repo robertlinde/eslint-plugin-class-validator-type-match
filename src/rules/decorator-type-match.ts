@@ -19,6 +19,7 @@ const TYPE_AGNOSTIC_DECORATORS = new Set([
   'ValidateNested',
   'IsDefined',
   'IsEmpty',
+  'IsNotEmpty',
   'Equals',
   'NotEquals',
   'IsIn',
@@ -39,7 +40,6 @@ const TYPE_AGNOSTIC_DECORATORS = new Set([
 const decoratorTypeMap: Record<string, string[]> = {
   // String validators
   IsString: ['string'],
-  IsNotEmpty: [], // Can be any type, but kept for backward compatibility
 
   // Number validators
   IsNumber: ['number'],
@@ -160,7 +160,8 @@ function isComplexType(typeNode: TSESTree.TypeNode): boolean {
   // Check for type references (class names, interfaces, etc.)
   if (typeNode.type === 'TSTypeReference' && typeNode.typeName.type === 'Identifier') {
     const typeName = typeNode.typeName.name;
-    // Exclude primitive wrapper types and common built-in types
+    // Common built-in types that don't require @ValidateNested
+    // This list focuses on types commonly used in validation contexts
     const builtInTypes = ['String', 'Number', 'Boolean', 'Date', 'Array', 'Promise', 'Map', 'Set'];
     return !builtInTypes.includes(typeName);
   }
@@ -237,7 +238,7 @@ function getIsEnumArgument(decorator: TSESTree.Decorator): string | null {
 function checkTypeMatch(decorator: string, typeAnnotation: TSESTree.TypeNode, actualType: string): boolean {
   const expectedTypes = decoratorTypeMap[decorator];
 
-  // Skip decorators not in our map or type-agnostic ones
+  // Skip decorators not in our map
   if (!expectedTypes || expectedTypes.length === 0) {
     return true;
   }
