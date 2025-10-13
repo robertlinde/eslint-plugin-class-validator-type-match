@@ -40,43 +40,6 @@ const TYPE_AGNOSTIC_DECORATORS = new Set([
 /**
  * Mapping of class-validator decorators to their expected TypeScript types.
  * Only includes decorators that enforce specific types.
- *
- * @example
- * // ✅ Good - nullable complex type with @ValidateNested
- * class User {
- *   @IsOptional()
- *   @ValidateNested()
- *   @Type(() => Address)
- *   address?: Address | null;
- * }
- *
- * @example
- * // ❌ Bad - nullable complex type without @ValidateNested
- * class User {
- *   @IsOptional()
- *   @Type(() => Address)
- *   address?: Address | null;
- * }
- *
- * @example
- * // ✅ Good - array of nullable complex types
- * class User {
- *   @IsArray()
- *   @ValidateNested({ each: true })
- *   @Type(() => Address)
- *   addresses!: (Address | null)[];
- * }
- *
- * @example
- * // ❌ Bad - array of nullable complex types without @ValidateNested
- * class User {
- *   @IsArray()
- *   @Type(() => Address)
- *   addresses!: (Address | null)[];
- * }
- *
- * @example
- * IsString: ["string"] - expects string type
  */
 const decoratorTypeMap: Record<string, string[]> = {
   // String validators
@@ -482,34 +445,57 @@ function getTypeDecoratorClassName(decorator: TSESTree.Decorator): string | null
 }
 
 /**
- * Checks if @ValidateNested decorator includes the { each: true } option.
+ * Checks if a decorator includes the { each: true } option.
  * Returns false for decorators without parentheses or without the each option.
+ * This works for any decorator, not just @ValidateNested.
+ *
+ * Handles both single and two-parameter decorator signatures:
+ * - @IsString({ each: true })
+ * - @IsNumber({}, { each: true })
+ * - @Min(0, { each: true })
  */
-function hasValidateNestedEachOption(decorator: TSESTree.Decorator): boolean {
-  // If decorator is used without parentheses (e.g., @ValidateNested), it has no options
+function hasEachOption(decorator: TSESTree.Decorator): boolean {
+  // If decorator is used without parentheses (e.g., @IsString), it has no options
   if (decorator.expression.type === 'Identifier') {
     return false;
   }
 
-  if (decorator.expression.type === 'CallExpression' && decorator.expression.arguments.length > 0) {
-    const firstArg = decorator.expression.arguments[0];
+  if (decorator.expression.type === 'CallExpression') {
+    const args = decorator.expression.arguments;
 
-    if (firstArg.type === 'ObjectExpression') {
-      return firstArg.properties.some((prop) => {
-        if (
-          prop.type === 'Property' &&
-          prop.key.type === 'Identifier' &&
-          prop.key.name === 'each' &&
-          prop.value.type === 'Literal'
-        ) {
-          return prop.value.value === true;
-        }
-        return false;
-      });
+    // Check both first and second arguments for { each: true }
+    // Some decorators have validation options as first param: @IsString({ each: true })
+    // Others have it as second param: @Min(0, { each: true })
+    for (let i = 0; i < Math.min(args.length, 2); i++) {
+      const arg = args[i];
+
+      if (arg.type === 'ObjectExpression') {
+        const hasEach = arg.properties.some((prop) => {
+          if (
+            prop.type === 'Property' &&
+            prop.key.type === 'Identifier' &&
+            prop.key.name === 'each' &&
+            prop.value.type === 'Literal'
+          ) {
+            return prop.value.value === true;
+          }
+          return false;
+        });
+
+        if (hasEach) return true;
+      }
     }
   }
 
   return false;
+}
+
+/**
+ * Checks if @ValidateNested decorator includes the { each: true } option.
+ * Returns false for decorators without parentheses or without the each option.
+ */
+function hasValidateNestedEachOption(decorator: TSESTree.Decorator): boolean {
+  return hasEachOption(decorator);
 }
 
 /**
@@ -580,156 +566,7 @@ function checkTypeMatch(decorator: string, typeAnnotation: TSESTree.TypeNode, ac
  * - Tuple types ([T, U])
  * - Nullable unions (T | null | undefined)
  * - Unnecessary @ValidateNested on primitive arrays
- *
- * @example
- * // ❌ Bad - will trigger error
- * class User {
- *   @IsString()
- *   name!: number;
- * }
- *
- * @example
- * // ✅ Good - types match
- * class User {
- *   @IsString()
- *   name!: string;
- * }
- *
- * @example
- * // ❌ Bad - @Type doesn't match TypeScript type
- * class User {
- *   @ValidateNested()
- *   @Type(() => Address)
- *   address: string;
- * }
- *
- * @example
- * // ✅ Good - @Type matches TypeScript type
- * class User {
- *   @ValidateNested()
- *   @Type(() => Address)
- *   address: Address;
- * }
- *
- * @example
- * // ❌ Bad - array of objects without @ValidateNested
- * class User {
- *   @IsArray()
- *   addresses!: Address[];
- * }
- *
- * @example
- * // ✅ Good - array of objects with @ValidateNested
- * class User {
- *   @IsArray()
- *   @ValidateNested({ each: true })
- *   @Type(() => Address)
- *   addresses!: Address[];
- * }
- *
- * @example
- * // ✅ Good - array of primitives without @ValidateNested
- * class User {
- *   @IsArray()
- *   @IsString({ each: true })
- *   tags!: string[];
- * }
- *
- * @example
- * // ❌ Bad - array of primitives with unnecessary @ValidateNested
- * class User {
- *   @IsArray()
- *   @ValidateNested({ each: true })
- *   @IsString({ each: true })
- *   tags!: string[];
- * }
- *
- * @example
- * // ❌ Bad - complex type without @ValidateNested
- * class User {
- *   @IsDefined()
- *   profile!: Profile;
- * }
- *
- * @example
- * // ✅ Good - complex type with @ValidateNested
- * class User {
- *   @ValidateNested()
- *   @Type(() => Profile)
- *   profile!: Profile;
- * }
- *
- * @example
- * // ❌ Bad - intersection type without @ValidateNested
- * class User {
- *   @IsDefined()
- *   data!: Profile & Settings;
- * }
- *
- * @example
- * // ✅ Good - intersection type with @ValidateNested
- * class User {
- *   @ValidateNested()
- *   data!: Profile & Settings;
- * }
- *
- * @example
- * // ✅ Good - literal type
- * class User {
- *   @IsString()
- *   role!: "admin";
- * }
- *
- * @example
- * // ❌ Bad - @IsEnum with wrong enum type
- * class User {
- *   @IsEnum(UserRole)
- *   status!: UserStatus;
- * }
- *
- * @example
- * // ✅ Good - @IsEnum matches enum type
- * class User {
- *   @IsEnum(UserStatus)
- *   status!: UserStatus;
- * }
- *
- * @example
- * // ✅ Good - union type with @IsEnum
- * class User {
- *   @IsEnum({ ACTIVE: 'active', INACTIVE: 'inactive' })
- *   status!: 'active' | 'inactive';
- * }
- *
- * @example
- * // ❌ Bad - enum type used with wrong decorator
- * class User {
- *   @IsString()
- *   status!: UserStatus;  // Should use @IsEnum, will report type mismatch
- * }
- *
- * @example
- * // ✅ Good - nullable union with @IsOptional
- * class User {
- *   @IsOptional()
- *   @IsString()
- *   name!: string | null;
- * }
- *
- * @example
- * // ✅ Good - readonly array
- * class User {
- *   @IsArray()
- *   @ValidateNested({ each: true })
- *   addresses!: readonly Address[];
- * }
- *
- * @example
- * // ✅ Good - tuple type
- * class User {
- *   @IsArray()
- *   coords!: [number, number];
- * }
+ * - Decorators with { each: true } option for array element validation
  */
 export default createRule<Options, MessageIds>({
   name: 'decorator-type-match',
@@ -737,7 +574,7 @@ export default createRule<Options, MessageIds>({
     type: 'problem',
     docs: {
       description:
-        'Ensure class-validator decorators match TypeScript type annotations, including arrays of objects, nested objects, enum types, literal types, intersection types, readonly arrays, tuple types, nullable unions, and @Type decorator matching',
+        'Ensure class-validator decorators match TypeScript type annotations, including arrays of objects, nested objects, enum types, literal types, intersection types, readonly arrays, tuple types, nullable unions, @Type decorator matching, and { each: true } option handling',
     },
     messages: {
       mismatch: 'Decorator @{{decorator}} does not match type annotation {{actualType}}. Expected: {{expectedTypes}}',
@@ -969,7 +806,36 @@ export default createRule<Options, MessageIds>({
           // Skip type-agnostic decorators
           if (TYPE_AGNOSTIC_DECORATORS.has(decorator)) continue;
 
-          const matches = checkTypeMatch(decorator, typeAnnotation, actualType);
+          // Get the decorator node to check for { each: true }
+          const decoratorNode = node.decorators?.find((d) => {
+            if (d.expression.type === 'CallExpression' && d.expression.callee.type === 'Identifier') {
+              return d.expression.callee.name === decorator;
+            }
+            if (d.expression.type === 'Identifier') {
+              return d.expression.name === decorator;
+            }
+            return false;
+          });
+
+          // Check if this decorator has { each: true } option
+          const hasEach = decoratorNode ? hasEachOption(decoratorNode) : false;
+
+          let typeToCheck = actualType;
+          let typeNodeToCheck = typeAnnotation;
+
+          // If decorator has { each: true }, validate against array element type
+          if (hasEach && isArrayType(typeAnnotation)) {
+            const elementTypeNode = getArrayElementTypeNode(typeAnnotation);
+            if (elementTypeNode) {
+              const elementType = getTypeString(elementTypeNode);
+              if (elementType) {
+                typeToCheck = elementType;
+                typeNodeToCheck = elementTypeNode;
+              }
+            }
+          }
+
+          const matches = checkTypeMatch(decorator, typeNodeToCheck, typeToCheck);
 
           // Report mismatch
           if (!matches) {
@@ -979,7 +845,7 @@ export default createRule<Options, MessageIds>({
               messageId: 'mismatch',
               data: {
                 decorator,
-                actualType,
+                actualType: typeToCheck,
                 expectedTypes: expectedTypes?.join(' or ') || 'unknown',
               },
             });
