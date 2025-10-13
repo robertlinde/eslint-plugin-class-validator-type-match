@@ -1,4 +1,5 @@
 import {ESLintUtils, type TSESTree} from '@typescript-eslint/utils';
+import type * as ts from 'typescript';
 
 /**
  * Creates an ESLint rule with proper documentation URL
@@ -236,11 +237,70 @@ function getTypeReferenceName(typeName: TSESTree.EntityName): string {
 }
 
 /**
+ * Uses TypeScript's type checker to resolve the actual type, handling type aliases.
+ * Returns the resolved type string, or null if it cannot be determined.
+ */
+function resolveTypeWithChecker(
+  typeNode: TSESTree.TypeNode,
+  checker: ts.TypeChecker | null,
+  esTreeNodeMap: {get(key: TSESTree.Node): ts.Node | undefined} | null,
+): string | null {
+  if (!checker || !esTreeNodeMap) {
+    return null;
+  }
+
+  const tsNode = esTreeNodeMap.get(typeNode);
+  if (!tsNode) {
+    return null;
+  }
+
+  try {
+    const type = checker.getTypeAtLocation(tsNode);
+
+    // Check for primitive types using TypeScript's type flags
+    if (type.flags & (1 << 2)) return 'string'; // ts.TypeFlags.String
+    if (type.flags & (1 << 3)) return 'number'; // ts.TypeFlags.Number
+    if (type.flags & (1 << 4)) return 'boolean'; // ts.TypeFlags.Boolean
+
+    // Check if it's an array type
+    if (checker.isArrayType(type)) {
+      return 'array';
+    }
+
+    // Check if it's a tuple type
+    // TypeScript's ObjectType has objectFlags property, but it's not exposed in the public types
+    if ('objectFlags' in type && (type as ts.ObjectType).objectFlags & 8) {
+      // ts.ObjectFlags.Tuple = 8
+      return 'array';
+    }
+
+    // For other types, fall back to AST analysis
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+/**
  * Converts a TypeScript type node to its string representation for validation purposes.
  * Handles primitives, arrays, tuples, type references, literals, unions, and intersections.
  * Returns null for types that cannot be validated.
+ *
+ * Can optionally use TypeScript's type checker to resolve type aliases.
  */
-function getTypeString(typeNode: TSESTree.TypeNode): string | null {
+function getTypeString(
+  typeNode: TSESTree.TypeNode,
+  checker: ts.TypeChecker | null = null,
+  esTreeNodeMap: {get(key: TSESTree.Node): ts.Node | undefined} | null = null,
+): string | null {
+  // Try to resolve with type checker first (handles type aliases)
+  if (checker && esTreeNodeMap) {
+    const resolved = resolveTypeWithChecker(typeNode, checker, esTreeNodeMap);
+    if (resolved) {
+      return resolved;
+    }
+  }
+
   const unwrapped = unwrapReadonlyOperator(typeNode);
 
   switch (unwrapped.type) {
@@ -270,6 +330,13 @@ function getTypeString(typeNode: TSESTree.TypeNode): string | null {
       }
       return 'literal';
     case 'TSIntersectionType':
+      // Check if intersection contains a primitive type (branded types)
+      for (const type of unwrapped.types) {
+        const typeStr = getTypeString(type, checker, esTreeNodeMap);
+        if (typeStr === 'string' || typeStr === 'number' || typeStr === 'boolean') {
+          return typeStr;
+        }
+      }
       return 'intersection';
   }
   return null;
@@ -337,13 +404,51 @@ function isUnionOfLiterals(typeNode: TSESTree.TypeNode): boolean {
 }
 
 /**
+ * Checks if a type reference is a Record utility type with a primitive value type.
+ * Record<string, number> = not complex
+ * Record<string, Address> = complex
+ */
+function isRecordWithPrimitiveValue(
+  typeNode: TSESTree.TypeNode,
+  checker: ts.TypeChecker | null,
+  esTreeNodeMap: {get(key: TSESTree.Node): ts.Node | undefined} | null,
+): boolean {
+  const unwrapped = unwrapReadonlyOperator(typeNode);
+
+  if (unwrapped.type !== 'TSTypeReference') {
+    return false;
+  }
+
+  const typeName = getTypeReferenceName(unwrapped.typeName);
+  if (typeName !== 'Record') {
+    return false;
+  }
+
+  // Check if it has type arguments
+  if (!unwrapped.typeArguments || unwrapped.typeArguments.params.length < 2) {
+    return false;
+  }
+
+  // Get the value type (second type argument)
+  const valueType = unwrapped.typeArguments.params[1];
+  const valueTypeStr = getTypeString(valueType, checker, esTreeNodeMap);
+
+  // If value type is a primitive, Record is not complex
+  return valueTypeStr === 'string' || valueTypeStr === 'number' || valueTypeStr === 'boolean';
+}
+
+/**
  * Determines if a type requires @ValidateNested decorator for proper validation.
  * Complex types include objects, class instances, type literals, and intersections.
  * Arrays of complex types are also considered complex.
  * Built-in types with complex generic parameters are checked selectively.
  * Union types are complex if any non-null/undefined member is complex.
  */
-function isComplexType(typeNode: TSESTree.TypeNode): boolean {
+function isComplexType(
+  typeNode: TSESTree.TypeNode,
+  checker: ts.TypeChecker | null = null,
+  esTreeNodeMap: {get(key: TSESTree.Node): ts.Node | undefined} | null = null,
+): boolean {
   const unwrapped = unwrapReadonlyOperator(typeNode);
 
   // Type literals are always complex
@@ -364,24 +469,32 @@ function isComplexType(typeNode: TSESTree.TypeNode): boolean {
         return false;
       }
       // Recursively check if this union member is complex
-      return isComplexType(type);
+      return isComplexType(type, checker, esTreeNodeMap);
     });
   }
 
-  // Intersection types are complex
+  // Intersection types: check if any member is a primitive (branded types)
   if (unwrapped.type === 'TSIntersectionType') {
+    // If intersection contains a primitive, treat as primitive (branded type)
+    for (const type of unwrapped.types) {
+      const typeStr = getTypeString(type, checker, esTreeNodeMap);
+      if (typeStr === 'string' || typeStr === 'number' || typeStr === 'boolean') {
+        return false;
+      }
+    }
+    // Otherwise, it's a complex intersection
     return true;
   }
 
   // Arrays are complex if their elements are complex
   if (unwrapped.type === 'TSArrayType') {
-    return isComplexType(unwrapped.elementType);
+    return isComplexType(unwrapped.elementType, checker, esTreeNodeMap);
   }
 
   // Tuples are complex if any element is complex
   if (unwrapped.type === 'TSTupleType') {
     const elements = getTupleElementTypes(unwrapped);
-    return elements.some((element) => isComplexType(element));
+    return elements.some((element) => isComplexType(element, checker, esTreeNodeMap));
   }
 
   // Check for type references (class names, interfaces, etc.)
@@ -398,9 +511,14 @@ function isComplexType(typeNode: TSESTree.TypeNode): boolean {
       return false;
     }
 
+    // Record<K, V> with primitive V is not complex
+    if (isRecordWithPrimitiveValue(unwrapped, checker, esTreeNodeMap)) {
+      return false;
+    }
+
     // Array<T> needs to check the element type
     if (typeName === 'Array' && unwrapped.typeArguments?.params[0]) {
-      return isComplexType(unwrapped.typeArguments.params[0]);
+      return isComplexType(unwrapped.typeArguments.params[0], checker, esTreeNodeMap);
     }
 
     // Other built-in types are not complex
@@ -579,7 +697,13 @@ function hasValidateNestedEachOption(decorator: TSESTree.Decorator): boolean {
  * Validates if a decorator matches the TypeScript type annotation.
  * Handles special cases like @IsEnum validation and nullable unions.
  */
-function checkTypeMatch(decorator: string, typeAnnotation: TSESTree.TypeNode, actualType: string): boolean {
+function checkTypeMatch(
+  decorator: string,
+  typeAnnotation: TSESTree.TypeNode,
+  actualType: string,
+  checker: ts.TypeChecker | null,
+  esTreeNodeMap: {get(key: TSESTree.Node): ts.Node | undefined} | null,
+): boolean {
   const expectedTypes = decoratorTypeMap[decorator];
 
   // Skip decorators not in our map
@@ -604,7 +728,7 @@ function checkTypeMatch(decorator: string, typeAnnotation: TSESTree.TypeNode, ac
   // For nullable unions (T | null | undefined), validate against the base type
   const nullableCheck = isNullableUnion(typeAnnotation);
   if (nullableCheck.isNullable && nullableCheck.baseType) {
-    const baseTypeString = getTypeString(nullableCheck.baseType);
+    const baseTypeString = getTypeString(nullableCheck.baseType, checker, esTreeNodeMap);
     if (baseTypeString) {
       return expectedTypes.some((expected) => {
         if (expected === 'array' && baseTypeString === 'Array') return true;
@@ -638,6 +762,7 @@ function checkTypeMatch(decorator: string, typeAnnotation: TSESTree.TypeNode, ac
  * - Enum types (both TypeScript enums and union types)
  * - Literal types (e.g., "admin", 25)
  * - Intersection types (e.g., Profile & Settings)
+ * - Branded types (string & { __brand: 'UserId' })
  * - @Type(() => ClassName) decorator matching
  * - Readonly arrays (readonly T[])
  * - Tuple types ([T, U])
@@ -648,6 +773,8 @@ function checkTypeMatch(decorator: string, typeAnnotation: TSESTree.TypeNode, ac
  * - Namespace/qualified type references (MyNamespace.MyEnum)
  * - Invalid { each: true } on non-array types
  * - Missing @Type decorator when @ValidateNested is present
+ * - Type aliases (via TypeScript type checker)
+ * - Record<K, V> utility types with primitive values
  */
 export default createRule<Options, MessageIds>({
   name: 'decorator-type-match',
@@ -655,7 +782,7 @@ export default createRule<Options, MessageIds>({
     type: 'problem',
     docs: {
       description:
-        'Ensure class-validator decorators match TypeScript type annotations, including arrays of objects, nested objects, enum types, literal types, intersection types, readonly arrays, tuple types, nullable unions, @Type decorator matching, { each: true } option handling, template literals, and namespace references',
+        'Ensure class-validator decorators match TypeScript type annotations, including arrays of objects, nested objects, enum types, literal types, intersection types, readonly arrays, tuple types, nullable unions, @Type decorator matching, { each: true } option handling, template literals, namespace references, type aliases, branded types, and Record utility types',
     },
     messages: {
       mismatch: 'Decorator @{{decorator}} does not match type annotation {{actualType}}. Expected: {{expectedTypes}}',
@@ -680,6 +807,20 @@ export default createRule<Options, MessageIds>({
   },
   defaultOptions: [],
   create(context) {
+    // Get TypeScript type checker if available
+    let checker: ts.TypeChecker | null = null;
+    let esTreeNodeMap: {get(key: TSESTree.Node): ts.Node | undefined} | null = null;
+
+    try {
+      const parserServices = context.parserServices;
+      if (parserServices?.program && parserServices?.esTreeNodeToTSNodeMap) {
+        checker = parserServices.program.getTypeChecker();
+        esTreeNodeMap = parserServices.esTreeNodeToTSNodeMap;
+      }
+    } catch {
+      // Type checker not available, continue with AST-only analysis
+    }
+
     return {
       /**
        * Analyzes class property definitions to validate decorator and type annotation matching
@@ -715,8 +856,9 @@ export default createRule<Options, MessageIds>({
         /**
          * Determine the actual TypeScript type from the annotation.
          * Supports primitive types, arrays, type references, literals, and intersections.
+         * Uses TypeScript's type checker when available to resolve type aliases.
          */
-        actualType = getTypeString(typeAnnotation);
+        actualType = getTypeString(typeAnnotation, checker, esTreeNodeMap);
 
         // Skip if we couldn't determine the type
         if (!actualType) return;
@@ -810,7 +952,7 @@ export default createRule<Options, MessageIds>({
                 }
               } else {
                 // @Type is used with an array of primitives
-                const elementType = getTypeString(elementTypeNode);
+                const elementType = getTypeString(elementTypeNode, checker, esTreeNodeMap);
                 if (elementType) {
                   context.report({
                     node,
@@ -829,7 +971,7 @@ export default createRule<Options, MessageIds>({
         // Special handling for tuple types
         if (isTupleType(typeAnnotation)) {
           const elements = getTupleElementTypes(typeAnnotation);
-          const hasComplexElements = elements.some((element) => isComplexType(element));
+          const hasComplexElements = elements.some((element) => isComplexType(element, checker, esTreeNodeMap));
 
           if (hasComplexElements) {
             context.report({
@@ -845,8 +987,8 @@ export default createRule<Options, MessageIds>({
           const elementTypeNode = getArrayElementTypeNode(typeAnnotation);
 
           if (elementTypeNode) {
-            const elementTypeName = getTypeString(elementTypeNode);
-            const isElementComplex = isComplexType(elementTypeNode);
+            const elementTypeName = getTypeString(elementTypeNode, checker, esTreeNodeMap);
+            const isElementComplex = isComplexType(elementTypeNode, checker, esTreeNodeMap);
 
             if (isElementComplex && elementTypeName) {
               // Complex element type - requires @ValidateNested({ each: true })
@@ -883,16 +1025,26 @@ export default createRule<Options, MessageIds>({
                 }
 
                 // Check if @Type decorator is present for complex element types
-                if (!hasTypeDecorator && elementTypeNode.type === 'TSTypeReference') {
-                  const className = getTypeReferenceName(elementTypeNode.typeName);
-                  context.report({
-                    node,
-                    messageId: 'missingTypeDecorator',
-                    data: {
-                      actualType: `${className}[]`,
-                      className,
-                    },
-                  });
+                if (!hasTypeDecorator) {
+                  let elementTypeToCheck = elementTypeNode;
+
+                  // Handle nullable element types: (Address | null)[]
+                  const nullableCheck = isNullableUnion(elementTypeNode);
+                  if (nullableCheck.isNullable && nullableCheck.baseType) {
+                    elementTypeToCheck = nullableCheck.baseType;
+                  }
+
+                  if (elementTypeToCheck.type === 'TSTypeReference') {
+                    const className = getTypeReferenceName(elementTypeToCheck.typeName);
+                    context.report({
+                      node,
+                      messageId: 'missingTypeDecorator',
+                      data: {
+                        actualType: `${className}[]`,
+                        className,
+                      },
+                    });
+                  }
                 }
               }
             } else if (!isElementComplex && hasValidateNested && elementTypeName) {
@@ -954,7 +1106,7 @@ export default createRule<Options, MessageIds>({
           if (hasEach && isArrayType(typeAnnotation)) {
             const elementTypeNode = getArrayElementTypeNode(typeAnnotation);
             if (elementTypeNode) {
-              const elementType = getTypeString(elementTypeNode);
+              const elementType = getTypeString(elementTypeNode, checker, esTreeNodeMap);
               if (elementType) {
                 typeToCheck = elementType;
                 typeNodeToCheck = elementTypeNode;
@@ -962,7 +1114,7 @@ export default createRule<Options, MessageIds>({
             }
           }
 
-          const matches = checkTypeMatch(decorator, typeNodeToCheck, typeToCheck);
+          const matches = checkTypeMatch(decorator, typeNodeToCheck, typeToCheck, checker, esTreeNodeMap);
 
           // Report mismatch
           if (!matches) {
@@ -982,7 +1134,11 @@ export default createRule<Options, MessageIds>({
         // Validate complex object types have @ValidateNested decorator
         const hasTypedDecorator = decorators.some((d) => !TYPE_AGNOSTIC_DECORATORS.has(d) && decoratorTypeMap[d]);
 
-        if (!isArrayType(typeAnnotation) && isComplexType(typeAnnotation) && !hasTypedDecorator) {
+        if (
+          !isArrayType(typeAnnotation) &&
+          isComplexType(typeAnnotation, checker, esTreeNodeMap) &&
+          !hasTypedDecorator
+        ) {
           // Complex types should have @ValidateNested()
           if (!hasValidateNested && decorators.length > 0) {
             context.report({
@@ -996,9 +1152,22 @@ export default createRule<Options, MessageIds>({
         }
 
         // Check if complex non-array types with @ValidateNested also have @Type
-        if (!isArrayType(typeAnnotation) && isComplexType(typeAnnotation) && hasValidateNested && !hasTypeDecorator) {
-          if (typeAnnotation.type === 'TSTypeReference') {
-            const className = getTypeReferenceName(typeAnnotation.typeName);
+        if (
+          !isArrayType(typeAnnotation) &&
+          isComplexType(typeAnnotation, checker, esTreeNodeMap) &&
+          hasValidateNested &&
+          !hasTypeDecorator
+        ) {
+          let typeToCheck = typeAnnotation;
+
+          // Handle nullable complex types: Address | null | undefined
+          const nullableCheck = isNullableUnion(typeAnnotation);
+          if (nullableCheck.isNullable && nullableCheck.baseType) {
+            typeToCheck = nullableCheck.baseType;
+          }
+
+          if (typeToCheck.type === 'TSTypeReference') {
+            const className = getTypeReferenceName(typeToCheck.typeName);
             context.report({
               node,
               messageId: 'missingTypeDecorator',
