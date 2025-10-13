@@ -18,7 +18,10 @@ type MessageIds =
   | 'unnecessaryValidateNested'
   | 'invalidEachOption'
   | 'missingTypeDecorator'
-  | 'tupleValidationWarning';
+  | 'tupleValidationWarning'
+  | 'multiTypeUnionWarning'
+  | 'mixedComplexityUnionWarning'
+  | 'pickOmitWarning';
 type Options = [];
 
 /**
@@ -355,11 +358,11 @@ function getArrayElementTypeNode(typeAnnotation: TSESTree.TypeNode): TSESTree.Ty
     return unwrapped.elementType;
   }
 
-  // Handle Array<Type> syntax
+  // Handle Array<Type> and ReadonlyArray<Type> syntax
   if (
     unwrapped.type === 'TSTypeReference' &&
     unwrapped.typeName.type === 'Identifier' &&
-    unwrapped.typeName.name === 'Array' &&
+    (unwrapped.typeName.name === 'Array' || unwrapped.typeName.name === 'ReadonlyArray') &&
     unwrapped.typeArguments?.params[0]
   ) {
     return unwrapped.typeArguments.params[0];
@@ -438,6 +441,131 @@ function isRecordWithPrimitiveValue(
 }
 
 /**
+ * Gets the underlying type from utility types like Partial, Required, Pick, Omit, etc.
+ * Returns null if not a supported utility type or if type arguments are missing.
+ */
+function getUtilityTypeArgument(
+  typeNode: TSESTree.TypeNode,
+): {utilityType: string; typeArgument: TSESTree.TypeNode; allTypeArguments: TSESTree.TypeNode[]} | null {
+  const unwrapped = unwrapReadonlyOperator(typeNode);
+
+  if (unwrapped.type !== 'TSTypeReference') {
+    return null;
+  }
+
+  const typeName = getTypeReferenceName(unwrapped.typeName);
+  const supportedUtilityTypes = [
+    'Partial',
+    'Required',
+    'Pick',
+    'Omit',
+    'Readonly',
+    'NonNullable',
+    'Extract',
+    'Exclude',
+    'ReadonlyArray',
+  ];
+
+  if (!supportedUtilityTypes.includes(typeName)) {
+    return null;
+  }
+
+  // All these utility types have at least one type argument
+  if (!unwrapped.typeArguments || unwrapped.typeArguments.params.length === 0) {
+    return null;
+  }
+
+  return {
+    utilityType: typeName,
+    typeArgument: unwrapped.typeArguments.params[0],
+    allTypeArguments: unwrapped.typeArguments.params,
+  };
+}
+
+/**
+ * Unwraps utility types to get the base type reference for @Type decorator suggestions.
+ * For Pick<User, 'name'> -> returns User
+ * For Partial<Address> -> returns Address
+ */
+function unwrapUtilityTypeForClassName(typeNode: TSESTree.TypeNode): TSESTree.TypeNode {
+  let current = typeNode;
+
+  // Keep unwrapping utility types until we hit the base type
+  while (true) {
+    const utilityInfo = getUtilityTypeArgument(current);
+    if (!utilityInfo) {
+      break;
+    }
+
+    // Use the first argument, assuming it's the source type for most utility types
+    current = utilityInfo.typeArgument;
+  }
+
+  return current;
+}
+
+/**
+ * Analyzes a union type to determine its composition.
+ * Returns information about what types are present in the union.
+ * Uses isComplexType to accurately classify each union member.
+ */
+function analyzeUnionType(
+  typeNode: TSESTree.TypeNode,
+  checker: ts.TypeChecker | null = null,
+  esTreeNodeMap: {get(key: TSESTree.Node): ts.Node | undefined} | null = null,
+): {
+  isNullable: boolean;
+  hasMultiplePrimitives: boolean;
+  hasMultipleComplexTypes: boolean;
+  hasMixedComplexity: boolean;
+  nonNullTypes: TSESTree.TypeNode[];
+  primitiveTypes: string[];
+  complexTypes: TSESTree.TypeNode[];
+} {
+  const result = {
+    isNullable: false,
+    hasMultiplePrimitives: false,
+    hasMultipleComplexTypes: false,
+    hasMixedComplexity: false,
+    nonNullTypes: [] as TSESTree.TypeNode[],
+    primitiveTypes: [] as string[],
+    complexTypes: [] as TSESTree.TypeNode[],
+  };
+
+  if (typeNode.type !== 'TSUnionType') {
+    return result;
+  }
+
+  for (const type of typeNode.types) {
+    if (type.type === 'TSNullKeyword' || type.type === 'TSUndefinedKeyword') {
+      result.isNullable = true;
+      continue;
+    }
+
+    result.nonNullTypes.push(type);
+
+    // Use isComplexType for accurate classification
+    const typeIsComplex = isComplexType(type, checker, esTreeNodeMap);
+
+    if (typeIsComplex) {
+      result.complexTypes.push(type);
+    } else {
+      // It's a simple/primitive type
+      const typeStr = getTypeString(type, checker, esTreeNodeMap);
+      if (typeStr) {
+        result.primitiveTypes.push(typeStr);
+      }
+    }
+  }
+
+  result.hasMultiplePrimitives = result.primitiveTypes.length > 1;
+  result.hasMultipleComplexTypes = result.complexTypes.length > 1;
+  result.hasMixedComplexity = result.primitiveTypes.length > 0 && result.complexTypes.length > 0;
+
+  return result;
+}
+
+/**
  * Determines if a type requires @ValidateNested decorator for proper validation.
  * Complex types include objects, class instances, type literals, and intersections.
  * Arrays of complex types are also considered complex.
@@ -463,14 +591,9 @@ function isComplexType(
 
   // Union types are complex if any non-null/undefined member is complex
   if (unwrapped.type === 'TSUnionType') {
-    return unwrapped.types.some((type) => {
-      // Skip null and undefined - they don't affect complexity
-      if (type.type === 'TSNullKeyword' || type.type === 'TSUndefinedKeyword') {
-        return false;
-      }
-      // Recursively check if this union member is complex
-      return isComplexType(type, checker, esTreeNodeMap);
-    });
+    const unionAnalysis = analyzeUnionType(unwrapped, checker, esTreeNodeMap);
+    // If there are any complex types in the union, it's complex
+    return unionAnalysis.complexTypes.length > 0;
   }
 
   // Intersection types: check if any member is a primitive (branded types)
@@ -511,6 +634,48 @@ function isComplexType(
       return false;
     }
 
+    // Check for utility types - delegate to the underlying type
+    const utilityTypeInfo = getUtilityTypeArgument(unwrapped);
+    if (utilityTypeInfo) {
+      // ReadonlyArray<T> behaves like Array<T>
+      if (utilityTypeInfo.utilityType === 'ReadonlyArray') {
+        return isComplexType(utilityTypeInfo.typeArgument, checker, esTreeNodeMap);
+      }
+
+      // Partial<T>, Required<T>, Readonly<T>, Pick<T, K>, Omit<T, K>
+      // For complexity checking, we need to use the type checker if available
+      if (['Partial', 'Required', 'Readonly', 'Pick', 'Omit'].includes(utilityTypeInfo.utilityType)) {
+        // Try to resolve with type checker first for Pick/Omit
+        if (
+          checker &&
+          esTreeNodeMap &&
+          (utilityTypeInfo.utilityType === 'Pick' || utilityTypeInfo.utilityType === 'Omit')
+        ) {
+          const resolved = resolveTypeWithChecker(unwrapped, checker, esTreeNodeMap);
+          if (resolved) {
+            // If type checker resolved it to a primitive, it's not complex
+            return resolved !== 'string' && resolved !== 'number' && resolved !== 'boolean' && resolved !== 'Date';
+          }
+        }
+
+        // Fall back to checking if the underlying type is complex
+        // Note: Pick/Omit always create object types, but if we can't resolve with type checker,
+        // we check the source type. This may produce false positives for Pick<Complex, 'primitiveField'>
+        // but it's safer than false negatives.
+        return isComplexType(utilityTypeInfo.typeArgument, checker, esTreeNodeMap);
+      }
+
+      // NonNullable<T> - check if the underlying type is complex
+      if (utilityTypeInfo.utilityType === 'NonNullable') {
+        return isComplexType(utilityTypeInfo.typeArgument, checker, esTreeNodeMap);
+      }
+
+      // Extract<T, U> and Exclude<T, U> - check the first type argument
+      if (utilityTypeInfo.utilityType === 'Extract' || utilityTypeInfo.utilityType === 'Exclude') {
+        return isComplexType(utilityTypeInfo.typeArgument, checker, esTreeNodeMap);
+      }
+    }
+
     // Record<K, V> with primitive V is not complex
     if (isRecordWithPrimitiveValue(unwrapped, checker, esTreeNodeMap)) {
       return false;
@@ -546,7 +711,7 @@ function isArrayType(typeAnnotation: TSESTree.TypeNode): boolean {
   if (
     unwrapped.type === 'TSTypeReference' &&
     unwrapped.typeName.type === 'Identifier' &&
-    unwrapped.typeName.name === 'Array'
+    (unwrapped.typeName.name === 'Array' || unwrapped.typeName.name === 'ReadonlyArray')
   ) {
     return true;
   }
@@ -695,7 +860,7 @@ function hasValidateNestedEachOption(decorator: TSESTree.Decorator): boolean {
 
 /**
  * Validates if a decorator matches the TypeScript type annotation.
- * Handles special cases like @IsEnum validation and nullable unions.
+ * Handles special cases like @IsEnum validation, nullable unions, and utility types.
  */
 function checkTypeMatch(
   decorator: string,
@@ -723,6 +888,16 @@ function checkTypeMatch(
       return expectedTypes.includes('type-reference');
     }
     return false;
+  }
+
+  // For utility types, unwrap to the underlying type
+  const utilityTypeInfo = getUtilityTypeArgument(typeAnnotation);
+  if (utilityTypeInfo && utilityTypeInfo.utilityType !== 'ReadonlyArray') {
+    // Recursively check the underlying type
+    const underlyingType = getTypeString(utilityTypeInfo.typeArgument, checker, esTreeNodeMap);
+    if (underlyingType) {
+      return checkTypeMatch(decorator, utilityTypeInfo.typeArgument, underlyingType, checker, esTreeNodeMap);
+    }
   }
 
   // For nullable unions (T | null | undefined), validate against the base type
@@ -775,6 +950,9 @@ function checkTypeMatch(
  * - Missing @Type decorator when @ValidateNested is present
  * - Type aliases (via TypeScript type checker)
  * - Record<K, V> utility types with primitive values
+ * - Utility types: Partial<T>, Required<T>, Pick<T, K>, Omit<T, K>, ReadonlyArray<T>, NonNullable<T>, Extract<T, U>, Exclude<T, U>
+ * - Multi-type unions with explicit warnings for complex scenarios
+ * - Mixed complexity unions (primitive | complex types)
  */
 export default createRule<Options, MessageIds>({
   name: 'decorator-type-match',
@@ -782,7 +960,7 @@ export default createRule<Options, MessageIds>({
     type: 'problem',
     docs: {
       description:
-        'Ensure class-validator decorators match TypeScript type annotations, including arrays of objects, nested objects, enum types, literal types, intersection types, readonly arrays, tuple types, nullable unions, @Type decorator matching, { each: true } option handling, template literals, namespace references, type aliases, branded types, and Record utility types',
+        'Ensure class-validator decorators match TypeScript type annotations, including arrays of objects, nested objects, enum types, literal types, intersection types, readonly arrays, tuple types, nullable unions, @Type decorator matching, { each: true } option handling, template literals, namespace references, type aliases, branded types, Record utility types, and other utility types (Partial, Required, Pick, Omit, ReadonlyArray, NonNullable, Extract, Exclude). Provides explicit warnings for multi-type unions.',
     },
     messages: {
       mismatch: 'Decorator @{{decorator}} does not match type annotation {{actualType}}. Expected: {{expectedTypes}}',
@@ -802,6 +980,12 @@ export default createRule<Options, MessageIds>({
         'Complex type {{actualType}} with @ValidateNested() requires @Type(() => {{className}}) decorator for proper transformation.',
       tupleValidationWarning:
         'Tuple type contains complex elements. Consider using a regular array with @ValidateNested({ each: true }) or validate elements individually.',
+      multiTypeUnionWarning:
+        'Union type contains multiple complex types ({{types}}). Discriminated unions require custom validation logic - consider splitting into separate properties or using a custom validator.',
+      mixedComplexityUnionWarning:
+        'Union type mixes simple and complex types ({{primitives}} | {{complexTypes}}). This requires careful validation - simple types need type validators while complex types need @ValidateNested(). Consider using discriminated unions or custom validators.',
+      pickOmitWarning:
+        'Type {{utilityType}}<{{baseType}}, ...> may be picking/omitting primitive fields. If the resulting type is primitive, use the appropriate primitive decorator instead of @ValidateNested(). If complex, @ValidateNested() is correct.',
     },
     schema: [],
   },
@@ -982,6 +1166,43 @@ export default createRule<Options, MessageIds>({
           }
         }
 
+        // Special handling for multi-type unions - only warn for truly problematic cases
+        if (typeAnnotation.type === 'TSUnionType' && !isUnionOfLiterals(typeAnnotation)) {
+          const unionAnalysis = analyzeUnionType(typeAnnotation, checker, esTreeNodeMap);
+
+          // Only warn about unions with multiple complex types (genuinely hard to validate)
+          // Don't warn about multi-primitive unions (string | number) as they're common and not necessarily wrong
+          if (unionAnalysis.hasMultipleComplexTypes) {
+            const complexTypeNames = unionAnalysis.complexTypes
+              .map((t) => getTypeString(t, checker, esTreeNodeMap) || 'unknown')
+              .join(' | ');
+
+            context.report({
+              node,
+              messageId: 'multiTypeUnionWarning',
+              data: {
+                types: complexTypeNames,
+              },
+            });
+          }
+
+          // Warn about unions mixing primitives and complex types (requires different decorators)
+          if (unionAnalysis.hasMixedComplexity) {
+            const complexTypeNames = unionAnalysis.complexTypes
+              .map((t) => getTypeString(t, checker, esTreeNodeMap) || 'unknown')
+              .join(' | ');
+
+            context.report({
+              node,
+              messageId: 'mixedComplexityUnionWarning',
+              data: {
+                primitives: unionAnalysis.primitiveTypes.join(' | '),
+                complexTypes: complexTypeNames,
+              },
+            });
+          }
+        }
+
         // Validate arrays of complex types have proper nested validation
         if (isArrayType(typeAnnotation) && !isTupleType(typeAnnotation)) {
           const elementTypeNode = getArrayElementTypeNode(typeAnnotation);
@@ -1034,13 +1255,17 @@ export default createRule<Options, MessageIds>({
                     elementTypeToCheck = nullableCheck.baseType;
                   }
 
-                  if (elementTypeToCheck.type === 'TSTypeReference') {
-                    const className = getTypeReferenceName(elementTypeToCheck.typeName);
+                  // Unwrap utility types to get the base class name
+                  const unwrappedType = unwrapUtilityTypeForClassName(elementTypeToCheck);
+
+                  if (unwrappedType.type === 'TSTypeReference') {
+                    const className = getTypeReferenceName(unwrappedType.typeName);
+                    const displayType = getTypeString(elementTypeNode, checker, esTreeNodeMap);
                     context.report({
                       node,
                       messageId: 'missingTypeDecorator',
                       data: {
-                        actualType: `${className}[]`,
+                        actualType: `${displayType}[]`,
                         className,
                       },
                     });
@@ -1141,13 +1366,34 @@ export default createRule<Options, MessageIds>({
         ) {
           // Complex types should have @ValidateNested()
           if (!hasValidateNested && decorators.length > 0) {
-            context.report({
-              node,
-              messageId: 'missingValidateNested',
-              data: {
-                actualType,
-              },
-            });
+            // Check if it's a Pick/Omit type that might be a false positive
+            const utilityInfo = getUtilityTypeArgument(typeAnnotation);
+
+            if (utilityInfo && (utilityInfo.utilityType === 'Pick' || utilityInfo.utilityType === 'Omit')) {
+              // Provide a more helpful message for Pick/Omit
+              const baseTypeName =
+                utilityInfo.typeArgument.type === 'TSTypeReference'
+                  ? getTypeReferenceName(utilityInfo.typeArgument.typeName)
+                  : 'unknown';
+
+              context.report({
+                node,
+                messageId: 'pickOmitWarning',
+                data: {
+                  utilityType: utilityInfo.utilityType,
+                  baseType: baseTypeName,
+                },
+              });
+            } else {
+              // Standard complex type warning
+              context.report({
+                node,
+                messageId: 'missingValidateNested',
+                data: {
+                  actualType,
+                },
+              });
+            }
           }
         }
 
@@ -1166,13 +1412,17 @@ export default createRule<Options, MessageIds>({
             typeToCheck = nullableCheck.baseType;
           }
 
-          if (typeToCheck.type === 'TSTypeReference') {
-            const className = getTypeReferenceName(typeToCheck.typeName);
+          // Unwrap utility types to get the base class name
+          const unwrappedType = unwrapUtilityTypeForClassName(typeToCheck);
+
+          if (unwrappedType.type === 'TSTypeReference') {
+            const className = getTypeReferenceName(unwrappedType.typeName);
+            const displayType = getTypeString(typeToCheck, checker, esTreeNodeMap);
             context.report({
               node,
               messageId: 'missingTypeDecorator',
               data: {
-                actualType: className,
+                actualType: displayType || className,
                 className,
               },
             });
