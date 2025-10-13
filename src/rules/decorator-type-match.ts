@@ -13,7 +13,8 @@ type MessageIds =
   | 'missingValidateNested'
   | 'enumMismatch'
   | 'typeMismatch'
-  | 'missingEachOption';
+  | 'missingEachOption'
+  | 'unnecessaryValidateNested';
 type Options = [];
 
 /**
@@ -39,6 +40,40 @@ const TYPE_AGNOSTIC_DECORATORS = new Set([
 /**
  * Mapping of class-validator decorators to their expected TypeScript types.
  * Only includes decorators that enforce specific types.
+ *
+ * @example
+ * // ✅ Good - nullable complex type with @ValidateNested
+ * class User {
+ *   @IsOptional()
+ *   @ValidateNested()
+ *   @Type(() => Address)
+ *   address?: Address | null;
+ * }
+ *
+ * @example
+ * // ❌ Bad - nullable complex type without @ValidateNested
+ * class User {
+ *   @IsOptional()
+ *   @Type(() => Address)
+ *   address?: Address | null;
+ * }
+ *
+ * @example
+ * // ✅ Good - array of nullable complex types
+ * class User {
+ *   @IsArray()
+ *   @ValidateNested({ each: true })
+ *   @Type(() => Address)
+ *   addresses!: (Address | null)[];
+ * }
+ *
+ * @example
+ * // ❌ Bad - array of nullable complex types without @ValidateNested
+ * class User {
+ *   @IsArray()
+ *   @Type(() => Address)
+ *   addresses!: (Address | null)[];
+ * }
  *
  * @example
  * IsString: ["string"] - expects string type
@@ -214,6 +249,7 @@ function isUnionOfLiterals(typeNode: TSESTree.TypeNode): boolean {
  * Determines if a type requires @ValidateNested decorator for proper validation.
  * Complex types include objects, class instances, type literals, and intersections.
  * Built-in types with complex generic parameters are also considered complex.
+ * Union types are complex if any non-null/undefined member is complex.
  */
 function isComplexType(typeNode: TSESTree.TypeNode): boolean {
   const unwrapped = unwrapReadonlyOperator(typeNode);
@@ -226,6 +262,19 @@ function isComplexType(typeNode: TSESTree.TypeNode): boolean {
   // Union types of literals are not complex (they're enum-like)
   if (isUnionOfLiterals(unwrapped)) {
     return false;
+  }
+
+  // Union types are complex if any non-null/undefined member is complex
+  // This handles cases like: Address | null, Address | undefined, Address | Profile
+  if (unwrapped.type === 'TSUnionType') {
+    return unwrapped.types.some((type) => {
+      // Skip null and undefined - they don't affect complexity
+      if (type.type === 'TSNullKeyword' || type.type === 'TSUndefinedKeyword') {
+        return false;
+      }
+      // Recursively check if this union member is complex
+      return isComplexType(type);
+    });
   }
 
   // Intersection types are complex
@@ -442,6 +491,8 @@ function checkTypeMatch(decorator: string, typeAnnotation: TSESTree.TypeNode, ac
  * Enhanced to handle:
  * - Arrays of objects requiring @ValidateNested({ each: true })
  * - Nested objects requiring @ValidateNested()
+ * - Nullable complex types (Address | null, Address | undefined)
+ * - Arrays of nullable complex types ((Address | null)[])
  * - Type literals
  * - class-transformer decorators
  * - Enum types (both TypeScript enums and union types)
@@ -451,6 +502,7 @@ function checkTypeMatch(decorator: string, typeAnnotation: TSESTree.TypeNode, ac
  * - Readonly arrays (readonly T[])
  * - Tuple types ([T, U])
  * - Nullable unions (T | null | undefined)
+ * - Unnecessary @ValidateNested on primitive arrays
  *
  * @example
  * // ❌ Bad - will trigger error
@@ -496,6 +548,23 @@ function checkTypeMatch(decorator: string, typeAnnotation: TSESTree.TypeNode, ac
  *   @ValidateNested({ each: true })
  *   @Type(() => Address)
  *   addresses!: Address[];
+ * }
+ *
+ * @example
+ * // ✅ Good - array of primitives without @ValidateNested
+ * class User {
+ *   @IsArray()
+ *   @IsString({ each: true })
+ *   tags!: string[];
+ * }
+ *
+ * @example
+ * // ❌ Bad - array of primitives with unnecessary @ValidateNested
+ * class User {
+ *   @IsArray()
+ *   @ValidateNested({ each: true })
+ *   @IsString({ each: true })
+ *   tags!: string[];
  * }
  *
  * @example
@@ -603,6 +672,8 @@ export default createRule<Options, MessageIds>({
       typeMismatch: '@Type(() => {{typeDecoratorClass}}) does not match type annotation {{actualType}}.',
       missingEachOption:
         'Array of complex types requires @ValidateNested({ each: true }), but only @ValidateNested() was found.',
+      unnecessaryValidateNested:
+        'Array of primitive type {{elementType}} does not need @ValidateNested(). Remove @ValidateNested() or use @{{decorator}}({ each: true }) instead.',
     },
     schema: [],
   },
@@ -757,40 +828,59 @@ export default createRule<Options, MessageIds>({
           const elementTypeNode = getArrayElementTypeNode(typeAnnotation);
 
           // Tuples return null for elementTypeNode, skip nested validation check
-          if (elementTypeNode && isComplexType(elementTypeNode)) {
+          if (elementTypeNode) {
             const elementTypeName = getTypeString(elementTypeNode);
+            const isElementComplex = isComplexType(elementTypeNode);
 
-            if (!hasValidateNested && elementTypeName) {
-              context.report({
-                node,
-                messageId: 'nestedArrayMismatch',
-                data: {
-                  elementType: elementTypeName,
-                },
-              });
-            } else if (hasValidateNested && elementTypeName) {
-              // Validate { each: true } option is present for array nested validation
-              const validateNestedDecorator = node.decorators?.find((d) => {
-                if (d.expression.type === 'Identifier' && d.expression.name === 'ValidateNested') {
-                  return true;
-                }
-                if (
-                  d.expression.type === 'CallExpression' &&
-                  d.expression.callee.type === 'Identifier' &&
-                  d.expression.callee.name === 'ValidateNested'
-                ) {
-                  return true;
-                }
-                return false;
-              });
-
-              if (validateNestedDecorator && !hasValidateNestedEachOption(validateNestedDecorator)) {
+            if (isElementComplex && elementTypeName) {
+              // Complex element type - requires @ValidateNested({ each: true })
+              if (!hasValidateNested) {
                 context.report({
                   node,
-                  messageId: 'missingEachOption',
-                  data: {},
+                  messageId: 'nestedArrayMismatch',
+                  data: {
+                    elementType: elementTypeName,
+                  },
                 });
+              } else {
+                // Validate { each: true } option is present for array nested validation
+                const validateNestedDecorator = node.decorators?.find((d) => {
+                  if (d.expression.type === 'Identifier' && d.expression.name === 'ValidateNested') {
+                    return true;
+                  }
+                  if (
+                    d.expression.type === 'CallExpression' &&
+                    d.expression.callee.type === 'Identifier' &&
+                    d.expression.callee.name === 'ValidateNested'
+                  ) {
+                    return true;
+                  }
+                  return false;
+                });
+
+                if (validateNestedDecorator && !hasValidateNestedEachOption(validateNestedDecorator)) {
+                  context.report({
+                    node,
+                    messageId: 'missingEachOption',
+                    data: {},
+                  });
+                }
               }
+            } else if (!isElementComplex && hasValidateNested && elementTypeName) {
+              // Primitive element type - @ValidateNested is unnecessary
+              // Find an appropriate array validator decorator to suggest
+              const arrayValidatorDecorator = decorators.find(
+                (d) => decoratorTypeMap[d] && decoratorTypeMap[d].includes(elementTypeName),
+              );
+
+              context.report({
+                node,
+                messageId: 'unnecessaryValidateNested',
+                data: {
+                  elementType: elementTypeName,
+                  decorator: arrayValidatorDecorator || 'IsString',
+                },
+              });
             }
           }
         }
