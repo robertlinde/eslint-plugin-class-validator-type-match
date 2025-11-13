@@ -1060,7 +1060,7 @@ export default createRule<Options, MessageIds>({
          * Properties with decorators that are:
          * - Not optional (no ?)
          * - Not initialized (no = value)
-         * - Don't have undefined in their type
+         * - Don't have undefined or null in their type
          * Should use the definite assignment assertion (!)
          */
         const isOptionalProperty = node.optional === true;
@@ -1069,10 +1069,13 @@ export default createRule<Options, MessageIds>({
         const hasUndefinedInType =
           typeAnnotation.type === 'TSUndefinedKeyword' ||
           (typeAnnotation.type === 'TSUnionType' && typeAnnotation.types.some((t) => t.type === 'TSUndefinedKeyword'));
+        const hasNullInType =
+          typeAnnotation.type === 'TSNullKeyword' ||
+          (typeAnnotation.type === 'TSUnionType' && typeAnnotation.types.some((t) => t.type === 'TSNullKeyword'));
 
-        // If property is not optional, not initialized, doesn't have undefined in type,
+        // If property is not optional, not initialized, doesn't have undefined/null in type,
         // and doesn't have definite assignment, report an error
-        if (!isOptionalProperty && !hasInitializer && !hasUndefinedInType && !hasDefiniteAssignment) {
+        if (!isOptionalProperty && !hasInitializer && !hasUndefinedInType && !hasNullInType && !hasDefiniteAssignment) {
           const propertyName = node.key.type === 'Identifier' ? node.key.name : 'property';
           context.report({
             node,

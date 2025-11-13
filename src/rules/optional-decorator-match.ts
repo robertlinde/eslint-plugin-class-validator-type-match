@@ -378,10 +378,11 @@ export default createRule<Options, MessageIds>({
 
         /**
          * Priority 3: Null in type with @IsOptional() (likely incorrect)
-         * Note: ? adds undefined, not null
-         * Only flag if there's null but NO undefined (neither explicit nor from ?)
+         * @IsOptional() works with undefined, not null
+         * Flag if there's null in the type (with or without ?)
+         * However, if it already has undefined explicitly, we won't flag it as user might intentionally want both
          */
-        if (hasDecorator && hasNull && !hasUndefined && !isOptionalProperty) {
+        if (hasDecorator && hasNull && !hasUndefined) {
           const propertyTypeWithoutNull = getPropertyTypeWithoutNull(node);
           issues.push({
             messageId: 'nullUnionIncorrect',
