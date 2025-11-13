@@ -1,6 +1,6 @@
 {
   "name": "eslint-plugin-class-validator-type-match",
-  "version": "2.0.0",
+  "version": "2.0.1",
   "description": "ESLint plugin to ensure class-validator decorators match TypeScript type annotations",
   "keywords": [
     "eslint",
