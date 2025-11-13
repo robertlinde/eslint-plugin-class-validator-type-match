@@ -992,6 +992,7 @@ export default createRule<Options, MessageIds>({
         'Property {{propertyName}} with type {{propertyType}} requires definite assignment assertion (!). Change to: {{propertyName}}!: {{propertyType}}',
     },
     schema: [],
+    fixable: 'code',
   },
   defaultOptions: [],
   create(context) {
@@ -1081,6 +1082,12 @@ export default createRule<Options, MessageIds>({
             data: {
               propertyName,
               propertyType: actualType,
+            },
+            fix(fixer) {
+              // Find position after property key (and after optional marker if present)
+              // We need to insert ! before the : type annotation
+              const keyEnd = node.key.range[1];
+              return fixer.insertTextAfterRange([keyEnd, keyEnd], '!');
             },
           });
         }
