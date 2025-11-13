@@ -1065,7 +1065,7 @@ export default createRule<Options, MessageIds>({
          * Note: Properties with | null still require ! unless they also have ?
          */
         const isOptionalProperty = node.optional === true;
-        const hasInitializer = node.value !== undefined;
+        const hasInitializer = node.value !== undefined && node.value !== null;
         const hasDefiniteAssignment = node.definite === true;
         const hasUndefinedInType =
           typeAnnotation.type === 'TSUndefinedKeyword' ||
