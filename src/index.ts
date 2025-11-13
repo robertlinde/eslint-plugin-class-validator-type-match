@@ -3,6 +3,7 @@ import optionalDecoratorMatch from './rules/optional-decorator-match';
 import validateNestedMatch from './rules/validate-nested-match';
 import typeDecoratorMatch from './rules/type-decorator-match';
 import definiteAssignmentMatch from './rules/definite-assignment-match';
+import dtoFilenameMatch from './rules/dto-filename-match';
 
 export = {
   rules: {
@@ -11,6 +12,7 @@ export = {
     'validate-nested-match': validateNestedMatch,
     'type-decorator-match': typeDecoratorMatch,
     'definite-assignment-match': definiteAssignmentMatch,
+    'dto-filename-match': dtoFilenameMatch,
   },
   configs: {
     recommended: {
@@ -21,6 +23,7 @@ export = {
         'class-validator-type-match/validate-nested-match': 'error',
         'class-validator-type-match/type-decorator-match': 'error',
         'class-validator-type-match/definite-assignment-match': 'error',
+        'class-validator-type-match/dto-filename-match': 'error',
       },
     },
     strict: {
@@ -31,6 +34,7 @@ export = {
         'class-validator-type-match/validate-nested-match': 'error',
         'class-validator-type-match/type-decorator-match': 'error',
         'class-validator-type-match/definite-assignment-match': 'error',
+        'class-validator-type-match/dto-filename-match': 'error',
       },
     },
     basic: {
@@ -39,6 +43,7 @@ export = {
         'class-validator-type-match/decorator-type-match': 'error',
         'class-validator-type-match/optional-decorator-match': 'error',
         'class-validator-type-match/definite-assignment-match': 'error',
+        'class-validator-type-match/dto-filename-match': 'error',
       },
     },
   },
