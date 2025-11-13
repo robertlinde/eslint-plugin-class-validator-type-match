@@ -31,6 +31,7 @@ module.exports = {
     'class-validator-type-match/validate-nested-match': 'error',
     'class-validator-type-match/type-decorator-match': 'error',
     'class-validator-type-match/definite-assignment-match': 'error',
+    'class-validator-type-match/dto-filename-match': 'error',
   },
 };
 ```
@@ -49,7 +50,7 @@ module.exports = {
 
 - **`recommended`** - All rules enabled (best for most projects)
 - **`strict`** - All rules enabled with strict settings
-- **`basic`** - Only core type matching rules (decorator-type-match, optional-decorator-match, definite-assignment-match)
+- **`basic`** - Only core type matching rules (decorator-type-match, optional-decorator-match, definite-assignment-match, dto-filename-match)
 
 ```javascript
 // Use basic preset for less strict validation
@@ -197,6 +198,66 @@ class User {
 
   @IsString()
   username?: string; // ❌ Error: Property is optional but missing @IsOptional()
+}
+```
+
+### `dto-filename-match`
+
+Ensures DTO class names match their file naming convention.
+
+**File Naming Rules:**
+
+- Files structured like `.<type>.dto.ts` (e.g., `.body.dto.ts`, `.query.dto.ts`, `.param.dto.ts`) should have class names ending with `<Type>Dto` (e.g., `BodyDto`, `QueryDto`, `ParamDto`)
+- Files structured like `.dto.ts` should have class names ending with `Dto`
+
+**Examples:**
+
+```typescript
+// File: create-user.body.dto.ts
+import {IsString, IsEmail} from 'class-validator';
+
+export class CreateUserBodyDto {
+  // ✅ Correct - ends with BodyDto
+  @IsString()
+  name!: string;
+
+  @IsEmail()
+  email!: string;
+}
+
+// File: create-user.body.dto.ts
+export class CreateUserDto {
+  // ❌ Error: Expected class name to end with "BodyDto"
+  @IsString()
+  name!: string;
+}
+
+// File: update-profile.query.dto.ts
+export class UpdateProfileQueryDto {
+  // ✅ Correct - ends with QueryDto
+  @IsString()
+  filter?: string;
+}
+
+// File: user.dto.ts
+export class UserDto {
+  // ✅ Correct - ends with Dto
+  @IsString()
+  id!: string;
+}
+
+// File: user.dto.ts
+export class User {
+  // ❌ Error: Expected class name to end with "Dto"
+  @IsString()
+  id!: string;
+}
+
+// File: get-user.param.dto.ts
+export class GetUserParamDto {
+  // ✅ Correct - ends with ParamDto
+  @IsString()
+  userId!: string;
 }
 ```
 
