@@ -79,6 +79,14 @@ type Options = [
  *   @IsString()
  *   name: string | undefined;
  * }
+ *
+ * @example
+ * // ❌ Bad - @IsOptional() with null instead of undefined
+ * class User {
+ *   @IsOptional()
+ *   @IsString()
+ *   value: string | null; // Should be value?: string or value: string | undefined
+ * }
  */
 export default createRule<Options, MessageIds>({
   name: 'optional-decorator-match',
@@ -97,7 +105,7 @@ export default createRule<Options, MessageIds>({
       undefinedUnionWithoutOptional:
         'Property has @IsOptional() decorator and union with undefined, but is not marked as optional (?)',
       nullUnionIncorrect:
-        'Property type includes null but uses @IsOptional(). Note: ? adds undefined, not null. Use "| null" explicitly if needed',
+        'Property has @IsOptional() but uses "| null". @IsOptional() works with undefined, not null. Change to "{{propertyName}}?: {{propertyType}}" or use "| undefined" instead of "| null"',
       redundantUndefinedInType:
         'Property is marked as optional (?) which already adds undefined to the type. Remove "| undefined" from the type annotation',
     },
@@ -289,6 +297,36 @@ export default createRule<Options, MessageIds>({
       };
     };
 
+    /**
+     * Helper: Get property type without null
+     */
+    const getPropertyTypeWithoutNull = (node: TSESTree.PropertyDefinition): string => {
+      if (!node.typeAnnotation?.typeAnnotation) return 'unknown';
+
+      const typeNode = node.typeAnnotation.typeAnnotation;
+
+      if (typeNode.type === 'TSNullKeyword') return 'unknown';
+
+      if (typeNode.type === 'TSUnionType') {
+        const types = typeNode.types
+          .filter((t) => t.type !== 'TSNullKeyword')
+          .map((t) => {
+            if (t.type === 'TSStringKeyword') return 'string';
+            if (t.type === 'TSNumberKeyword') return 'number';
+            if (t.type === 'TSBooleanKeyword') return 'boolean';
+            if (t.type === 'TSUndefinedKeyword') return 'undefined';
+            if (t.type === 'TSTypeReference' && t.typeName.type === 'Identifier') {
+              return t.typeName.name;
+            }
+            return 'unknown';
+          });
+
+        return types.length > 1 ? types.join(' | ') : types[0] || 'unknown';
+      }
+
+      return getPropertyType(node);
+    };
+
     return {
       /**
        * Analyzes class property definitions to check @IsOptional() consistency
@@ -344,8 +382,13 @@ export default createRule<Options, MessageIds>({
          * Only flag if there's null but NO undefined (neither explicit nor from ?)
          */
         if (hasDecorator && hasNull && !hasUndefined && !isOptionalProperty) {
+          const propertyTypeWithoutNull = getPropertyTypeWithoutNull(node);
           issues.push({
             messageId: 'nullUnionIncorrect',
+            data: {
+              propertyName,
+              propertyType: propertyTypeWithoutNull,
+            },
           });
         }
 

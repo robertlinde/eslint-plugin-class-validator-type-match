@@ -21,7 +21,8 @@ type MessageIds =
   | 'tupleValidationWarning'
   | 'multiTypeUnionWarning'
   | 'mixedComplexityUnionWarning'
-  | 'pickOmitWarning';
+  | 'pickOmitWarning'
+  | 'missingDefiniteAssignment';
 type Options = [];
 
 /**
@@ -953,6 +954,7 @@ function checkTypeMatch(
  * - Utility types: Partial<T>, Required<T>, Pick<T, K>, Omit<T, K>, ReadonlyArray<T>, NonNullable<T>, Extract<T, U>, Exclude<T, U>
  * - Multi-type unions with explicit warnings for complex scenarios
  * - Mixed complexity unions (primitive | complex types)
+ * - Missing definite assignment assertion (!) on properties that require it
  */
 export default createRule<Options, MessageIds>({
   name: 'decorator-type-match',
@@ -960,7 +962,7 @@ export default createRule<Options, MessageIds>({
     type: 'problem',
     docs: {
       description:
-        'Ensure class-validator decorators match TypeScript type annotations, including arrays of objects, nested objects, enum types, literal types, intersection types, readonly arrays, tuple types, nullable unions, @Type decorator matching, { each: true } option handling, template literals, namespace references, type aliases, branded types, Record utility types, and other utility types (Partial, Required, Pick, Omit, ReadonlyArray, NonNullable, Extract, Exclude). Provides explicit warnings for multi-type unions.',
+        'Ensure class-validator decorators match TypeScript type annotations, including arrays of objects, nested objects, enum types, literal types, intersection types, readonly arrays, tuple types, nullable unions, @Type decorator matching, { each: true } option handling, template literals, namespace references, type aliases, branded types, Record utility types, and other utility types (Partial, Required, Pick, Omit, ReadonlyArray, NonNullable, Extract, Exclude). Provides explicit warnings for multi-type unions and checks for missing definite assignment assertions (!).',
     },
     messages: {
       mismatch: 'Decorator @{{decorator}} does not match type annotation {{actualType}}. Expected: {{expectedTypes}}',
@@ -986,6 +988,8 @@ export default createRule<Options, MessageIds>({
         'Union type mixes simple and complex types ({{primitives}} | {{complexTypes}}). This requires careful validation - simple types need type validators while complex types need @ValidateNested(). Consider using discriminated unions or custom validators.',
       pickOmitWarning:
         'Type {{utilityType}}<{{baseType}}, ...> may be picking/omitting primitive fields. If the resulting type is primitive, use the appropriate primitive decorator instead of @ValidateNested(). If complex, @ValidateNested() is correct.',
+      missingDefiniteAssignment:
+        'Property {{propertyName}} with type {{propertyType}} requires definite assignment assertion (!). Change to: {{propertyName}}!: {{propertyType}}',
     },
     schema: [],
   },
@@ -1050,6 +1054,35 @@ export default createRule<Options, MessageIds>({
         const hasValidateNested = decorators.includes('ValidateNested');
         const hasIsEnum = decorators.includes('IsEnum');
         const hasTypeDecorator = decorators.includes('Type');
+
+        /**
+         * Check for missing definite assignment assertion (!)
+         * Properties with decorators that are:
+         * - Not optional (no ?)
+         * - Not initialized (no = value)
+         * - Don't have undefined in their type
+         * Should use the definite assignment assertion (!)
+         */
+        const isOptionalProperty = node.optional === true;
+        const hasInitializer = node.value !== undefined;
+        const hasDefiniteAssignment = node.definite === true;
+        const hasUndefinedInType =
+          typeAnnotation.type === 'TSUndefinedKeyword' ||
+          (typeAnnotation.type === 'TSUnionType' && typeAnnotation.types.some((t) => t.type === 'TSUndefinedKeyword'));
+
+        // If property is not optional, not initialized, doesn't have undefined in type,
+        // and doesn't have definite assignment, report an error
+        if (!isOptionalProperty && !hasInitializer && !hasUndefinedInType && !hasDefiniteAssignment) {
+          const propertyName = node.key.type === 'Identifier' ? node.key.name : 'property';
+          context.report({
+            node,
+            messageId: 'missingDefiniteAssignment',
+            data: {
+              propertyName,
+              propertyType: actualType,
+            },
+          });
+        }
 
         // Validate @IsEnum argument matches the type annotation for enum type references
         if (hasIsEnum && typeAnnotation.type === 'TSTypeReference') {
