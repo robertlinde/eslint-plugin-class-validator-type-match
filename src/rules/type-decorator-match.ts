@@ -211,28 +211,34 @@ export default createRule<Options, MessageIds>({
           hasValidateNested &&
           !hasTypeDecorator
         ) {
-          let typeToCheck = typeAnnotation;
+          // Check if there's an @IsEnum decorator (single enum doesn't need each: true)
+          // This indicates it's an enum and doesn't need @Type
+          const hasIsEnum = decorators.includes('IsEnum');
 
-          // Handle nullable complex types: Address | null | undefined
-          const nullableCheck = isNullableUnion(typeAnnotation);
-          if (nullableCheck.isNullable && nullableCheck.baseType) {
-            typeToCheck = nullableCheck.baseType;
-          }
+          if (!hasIsEnum) {
+            let typeToCheck = typeAnnotation;
 
-          // Unwrap utility types to get the base class name
-          const unwrappedType = unwrapUtilityTypeForClassName(typeToCheck);
+            // Handle nullable complex types: Address | null | undefined
+            const nullableCheck = isNullableUnion(typeAnnotation);
+            if (nullableCheck.isNullable && nullableCheck.baseType) {
+              typeToCheck = nullableCheck.baseType;
+            }
 
-          if (unwrappedType.type === 'TSTypeReference') {
-            const className = getTypeReferenceName(unwrappedType.typeName);
-            const displayType = getTypeString(typeToCheck, checker, esTreeNodeMap);
-            context.report({
-              node,
-              messageId: 'missingTypeDecorator',
-              data: {
-                actualType: displayType || className,
-                className,
-              },
-            });
+            // Unwrap utility types to get the base class name
+            const unwrappedType = unwrapUtilityTypeForClassName(typeToCheck);
+
+            if (unwrappedType.type === 'TSTypeReference') {
+              const className = getTypeReferenceName(unwrappedType.typeName);
+              const displayType = getTypeString(typeToCheck, checker, esTreeNodeMap);
+              context.report({
+                node,
+                messageId: 'missingTypeDecorator',
+                data: {
+                  actualType: displayType || className,
+                  className,
+                },
+              });
+            }
           }
         }
 
@@ -242,7 +248,40 @@ export default createRule<Options, MessageIds>({
           if (elementTypeNode) {
             const isElementComplex = isComplexType(elementTypeNode, checker, esTreeNodeMap);
 
-            if (isElementComplex) {
+            // Check if there's an @IsEnum decorator with { each: true }
+            // This indicates the array elements are enums and don't need @Type
+            const hasIsEnumWithEach =
+              decorators.includes('IsEnum') &&
+              node.decorators?.some((d) => {
+                if (
+                  d.expression.type === 'CallExpression' &&
+                  d.expression.callee.type === 'Identifier' &&
+                  d.expression.callee.name === 'IsEnum'
+                ) {
+                  // Check if it has { each: true }
+                  const args = d.expression.arguments;
+                  for (let i = 0; i < Math.min(args.length, 2); i++) {
+                    const arg = args[i];
+                    if (arg.type === 'ObjectExpression') {
+                      const hasEach = arg.properties.some((prop) => {
+                        if (
+                          prop.type === 'Property' &&
+                          prop.key.type === 'Identifier' &&
+                          prop.key.name === 'each' &&
+                          prop.value.type === 'Literal'
+                        ) {
+                          return prop.value.value === true;
+                        }
+                        return false;
+                      });
+                      if (hasEach) return true;
+                    }
+                  }
+                }
+                return false;
+              });
+
+            if (isElementComplex && !hasIsEnumWithEach) {
               let elementTypeToCheck = elementTypeNode;
 
               // Handle nullable element types: (Address | null)[]
