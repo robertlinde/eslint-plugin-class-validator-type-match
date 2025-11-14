@@ -614,6 +614,26 @@ export function isComplexType(
       return false;
     }
 
+    // Check if it's an enum type by using the type checker
+    // Enums are type references but should not be treated as complex types
+    // They can be validated with @IsEnum instead of @ValidateNested
+    if (checker && esTreeNodeMap) {
+      const tsNode = esTreeNodeMap.get(unwrapped);
+      if (tsNode) {
+        try {
+          const type = checker.getTypeAtLocation(tsNode);
+          // Check if it's an enum type using TypeScript's type flags
+          // ts.TypeFlags.Enum = 1 << 10 = 1024
+          // ts.TypeFlags.EnumLiteral = 1 << 11 = 2048
+          if (type.flags & 1024 || type.flags & 2048) {
+            return false;
+          }
+        } catch {
+          // If we can't determine, continue with other checks
+        }
+      }
+    }
+
     // Check for utility types - delegate to the underlying type
     const utilityTypeInfo = getUtilityTypeArgument(unwrapped);
     if (utilityTypeInfo) {

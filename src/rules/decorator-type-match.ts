@@ -148,7 +148,8 @@ export default createRule<Options, MessageIds>({
         const hasIsEnum = decorators.includes('IsEnum');
 
         // Validate @IsEnum argument matches the type annotation for enum type references
-        if (hasIsEnum && typeAnnotation.type === 'TSTypeReference') {
+        // Skip this check for array types with { each: true }, as those validate array elements
+        if (hasIsEnum && typeAnnotation.type === 'TSTypeReference' && !isArrayType(typeAnnotation)) {
           const isEnumDecorator = node.decorators?.find(
             (d) =>
               d.expression.type === 'CallExpression' &&

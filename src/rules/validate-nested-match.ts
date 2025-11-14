@@ -220,7 +220,45 @@ export default createRule<Options, MessageIds>({
             const elementTypeName = getTypeString(elementTypeNode, checker, esTreeNodeMap);
             const isElementComplex = isComplexType(elementTypeNode, checker, esTreeNodeMap);
 
+            // Check if there's an @IsEnum decorator with { each: true }
+            // This indicates the array elements are enums and don't need @ValidateNested
+            const hasIsEnumWithEach =
+              decorators.includes('IsEnum') &&
+              node.decorators?.some((d) => {
+                if (
+                  d.expression.type === 'CallExpression' &&
+                  d.expression.callee.type === 'Identifier' &&
+                  d.expression.callee.name === 'IsEnum'
+                ) {
+                  // Check if it has { each: true }
+                  const args = d.expression.arguments;
+                  for (let i = 0; i < Math.min(args.length, 2); i++) {
+                    const arg = args[i];
+                    if (arg.type === 'ObjectExpression') {
+                      const hasEach = arg.properties.some((prop) => {
+                        if (
+                          prop.type === 'Property' &&
+                          prop.key.type === 'Identifier' &&
+                          prop.key.name === 'each' &&
+                          prop.value.type === 'Literal'
+                        ) {
+                          return prop.value.value === true;
+                        }
+                        return false;
+                      });
+                      if (hasEach) return true;
+                    }
+                  }
+                }
+                return false;
+              });
+
             if (isElementComplex && elementTypeName) {
+              // Skip validation if @IsEnum({ each: true }) is present - enums are handled by @IsEnum
+              if (hasIsEnumWithEach) {
+                return;
+              }
+
               // Complex element type - requires @ValidateNested({ each: true })
               if (!hasValidateNested) {
                 context.report({
