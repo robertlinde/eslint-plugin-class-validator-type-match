@@ -9,30 +9,35 @@ const createRule = ESLintUtils.RuleCreator(
   (name) => `https://github.com/robertlinde/eslint-plugin-class-validator-type-match#${name}`,
 );
 
-type MessageIds = 'missingDefiniteAssignment';
+type MessageIds = 'incorrectDefiniteAssignment';
 
 type Options = [];
 
 /**
- * ESLint rule to ensure properties with decorators use definite assignment assertion (!) when required.
+ * ESLint rule to ensure definite assignment assertion (!) is used correctly with decorators.
  *
  * This rule validates that:
- * - Properties with decorators that are not optional (no ?)
- * - Don't have an initializer (no = value)
- * - Don't have undefined in their type
- * - Use the definite assignment assertion (!)
- *
- * Note: Properties with | null still require ! unless they also have ?
+ * - Properties with ! should NOT have:
+ *   - Optional marker (?)
+ *   - An initializer (= value)
+ *   - undefined in their type
  *
  * @example
- * // ✅ Good - has definite assignment assertion
+ * // ✅ Good - ! without optional or initializer
  * class User {
  *   @IsString()
  *   name!: string;
  * }
  *
  * @example
- * // ✅ Good - optional property doesn't need !
+ * // ✅ Good - no ! is also fine for non-optional
+ * class User {
+ *   @IsString()
+ *   name: string;
+ * }
+ *
+ * @example
+ * // ✅ Good - optional property without !
  * class User {
  *   @IsOptional()
  *   @IsString()
@@ -40,31 +45,39 @@ type Options = [];
  * }
  *
  * @example
- * // ✅ Good - has initializer
+ * // ✅ Good - has initializer without !
  * class User {
  *   @IsString()
  *   name: string = 'default';
  * }
  *
  * @example
- * // ✅ Good - has undefined in type
+ * // ✅ Good - has undefined in type without !
  * class User {
  *   @IsString()
  *   name: string | undefined;
  * }
  *
  * @example
- * // ❌ Bad - missing definite assignment assertion
+ * // ❌ Bad - ! with optional property
  * class User {
+ *   @IsOptional()
  *   @IsString()
- *   name: string;
+ *   name?!: string;
  * }
  *
  * @example
- * // ❌ Bad - null doesn't count, still needs !
+ * // ❌ Bad - ! with initializer
  * class User {
  *   @IsString()
- *   name: string | null;
+ *   name!: string = 'default';
+ * }
+ *
+ * @example
+ * // ❌ Bad - ! with undefined in type
+ * class User {
+ *   @IsString()
+ *   name!: string | undefined;
  * }
  */
 export default createRule<Options, MessageIds>({
@@ -73,11 +86,11 @@ export default createRule<Options, MessageIds>({
     type: 'problem',
     docs: {
       description:
-        'Ensure properties with decorators use definite assignment assertion (!) when they are not optional, not initialized, and do not have undefined in their type',
+        'Ensure definite assignment assertion (!) is not used with optional properties, initializers, or undefined types',
     },
     messages: {
-      missingDefiniteAssignment:
-        'Property {{propertyName}} with type {{propertyType}} requires definite assignment assertion (!). Change to: {{propertyName}}!: {{propertyType}}',
+      incorrectDefiniteAssignment:
+        'Property {{propertyName}} should not use definite assignment assertion (!) because it {{reason}}. Remove the ! from: {{propertyName}}!',
     },
     schema: [],
     fixable: 'code',
@@ -115,13 +128,11 @@ export default createRule<Options, MessageIds>({
         if (!actualType) return;
 
         /**
-         * Check for missing definite assignment assertion (!)
-         * Properties with decorators that are:
-         * - Not optional (no ?)
-         * - Not initialized (no = value)
-         * - Don't have undefined in their type
-         * Should use the definite assignment assertion (!)
-         * Note: Properties with | null still require ! unless they also have ?
+         * Check for incorrect usage of definite assignment assertion (!)
+         * Properties should NOT use ! if they:
+         * - Are optional (have ?)
+         * - Have an initializer (= value)
+         * - Have undefined in their type
          */
         const isOptionalProperty = node.optional === true;
         const hasInitializer = node.value !== undefined && node.value !== null;
@@ -130,24 +141,35 @@ export default createRule<Options, MessageIds>({
           typeAnnotation.type === 'TSUndefinedKeyword' ||
           (typeAnnotation.type === 'TSUnionType' && typeAnnotation.types.some((t) => t.type === 'TSUndefinedKeyword'));
 
-        // If property is not optional, not initialized, doesn't have undefined in type,
-        // and doesn't have definite assignment, report an error
-        if (!isOptionalProperty && !hasInitializer && !hasUndefinedInType && !hasDefiniteAssignment) {
+        // If property has definite assignment (!), check if it's used incorrectly
+        if (hasDefiniteAssignment) {
           const propertyName = node.key.type === 'Identifier' ? node.key.name : 'property';
-          context.report({
-            node,
-            messageId: 'missingDefiniteAssignment',
-            data: {
-              propertyName,
-              propertyType: actualType,
-            },
-            fix(fixer) {
-              // Find position after property key (and after optional marker if present)
-              // We need to insert ! before the : type annotation
-              const keyEnd = node.key.range[1];
-              return fixer.insertTextAfterRange([keyEnd, keyEnd], '!');
-            },
-          });
+          let reason: string | null = null;
+
+          if (isOptionalProperty) {
+            reason = 'is optional (has ?)';
+          } else if (hasInitializer) {
+            reason = 'has an initializer';
+          } else if (hasUndefinedInType) {
+            reason = 'has undefined in its type';
+          }
+
+          if (reason) {
+            context.report({
+              node,
+              messageId: 'incorrectDefiniteAssignment',
+              data: {
+                propertyName,
+                reason,
+              },
+              fix(fixer) {
+                // Remove the ! after the property key
+                const keyEnd = node.key.range[1];
+                // The ! is between the key and the optional marker or colon
+                return fixer.removeRange([keyEnd, keyEnd + 1]);
+              },
+            });
+          }
         }
       },
     };
