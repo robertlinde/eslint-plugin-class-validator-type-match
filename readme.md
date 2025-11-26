@@ -148,7 +148,7 @@ class User {
 
 ### `definite-assignment-match`
 
-Ensures properties with decorators use definite assignment assertion (`!`) when required.
+Ensures definite assignment assertion (`!`) is used correctly with decorators.
 
 **Examples:**
 
@@ -157,20 +157,24 @@ import {IsString, IsOptional} from 'class-validator';
 
 class User {
   @IsString()
-  name!: string; // ✅ Correct - has definite assignment
+  name!: string; // ✅ Correct - ! can be used for non-optional
 
   @IsString()
-  email: string; // ❌ Error: Missing definite assignment assertion (!)
+  email: string; // ✅ Correct - ! is optional for non-optional properties
 
   @IsOptional()
   @IsString()
-  bio?: string; // ✅ Correct - optional property doesn't need !
+  bio?: string; // ✅ Correct - optional property without !
+
+  @IsOptional()
+  @IsString()
+  username?!: string; // ❌ Error: ! should not be used with optional (?)
 
   @IsString()
-  nickname: string = 'default'; // ✅ Correct - has initializer
+  nickname!: string = 'default'; // ❌ Error: ! should not be used with initializer
 
   @IsString()
-  description: string | undefined; // ✅ Correct - has undefined in type
+  description!: string | undefined; // ❌ Error: ! should not be used with undefined type
 }
 ```
 
