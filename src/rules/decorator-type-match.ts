@@ -11,6 +11,7 @@ import {
   getIsEnumArgument,
   getTypeReferenceName,
   isUnionEnumType,
+  isEnumArgumentArraySubset,
 } from '../utils/type-helpers.util';
 
 /**
@@ -94,7 +95,7 @@ export default createRule<Options, MessageIds>({
     let esTreeNodeMap: {get(key: TSESTree.Node): ts.Node | undefined} | null = null;
 
     try {
-      const parserServices = context.parserServices;
+      const parserServices = context.sourceCode.parserServices;
       if (parserServices?.program && parserServices?.esTreeNodeToTSNodeMap) {
         checker = parserServices.program.getTypeChecker();
         esTreeNodeMap = parserServices.esTreeNodeToTSNodeMap;
@@ -162,7 +163,9 @@ export default createRule<Options, MessageIds>({
             const typeName = getTypeReferenceName(typeAnnotation.typeName);
 
             // For TypeScript enum references, the argument should match the type
-            if (enumArg && enumArg !== typeName) {
+            // Skip this check if the argument is an array of enum values (subset pattern)
+            const isArraySubset = isEnumArgumentArraySubset(isEnumDecorator, checker, esTreeNodeMap);
+            if (enumArg && enumArg !== typeName && !isArraySubset) {
               context.report({
                 node,
                 messageId: 'enumMismatch',
