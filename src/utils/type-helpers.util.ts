@@ -776,6 +776,57 @@ export function getIsEnumArgument(decorator: TSESTree.Decorator): string | null 
 }
 
 /**
+ * Checks if the @IsEnum decorator argument is an array of enum values.
+ * This is a valid class-validator pattern for restricting validation to a subset of enum values.
+ *
+ * Example:
+ *   const WEIGHT_UNITS = [Unit.G, Unit.KG] as const;
+ *   @IsEnum(WEIGHT_UNITS)
+ *   unit?: Unit;
+ *
+ * Uses TypeScript type checker to determine if the argument resolves to an array/tuple type.
+ */
+export function isEnumArgumentArraySubset(
+  decorator: TSESTree.Decorator,
+  checker: ts.TypeChecker | null,
+  esTreeNodeMap: {get(key: TSESTree.Node): ts.Node | undefined} | null,
+): boolean {
+  if (!checker || !esTreeNodeMap) {
+    return false;
+  }
+
+  if (decorator.expression.type !== 'CallExpression' || decorator.expression.arguments.length === 0) {
+    return false;
+  }
+
+  const firstArg = decorator.expression.arguments[0];
+
+  // Get the TypeScript node for the argument
+  const tsNode = esTreeNodeMap.get(firstArg);
+  if (!tsNode) {
+    return false;
+  }
+
+  try {
+    const type = checker.getTypeAtLocation(tsNode);
+
+    // Check if it's an array type
+    if (checker.isArrayType(type)) {
+      return true;
+    }
+
+    // Check if it's a tuple type (for `as const` arrays)
+    if (checker.isTupleType(type)) {
+      return true;
+    }
+
+    return false;
+  } catch {
+    return false;
+  }
+}
+
+/**
  * Extracts the class name from @Type(() => ClassName) decorator.
  * Supports both arrow functions and function expressions.
  */
