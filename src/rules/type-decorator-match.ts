@@ -23,6 +23,16 @@ type MessageIds = 'typeMismatch' | 'missingTypeDecorator';
 type Options = [];
 
 /**
+ * Maps JavaScript wrapper class names to their corresponding primitive type names.
+ * Used to validate @Type(() => Number) with `number` type, etc.
+ */
+const PRIMITIVE_WRAPPER_MAP: Record<string, string> = {
+  Number: 'number',
+  String: 'string',
+  Boolean: 'boolean',
+};
+
+/**
  * ESLint rule to ensure @Type(() => ClassName) decorator matches TypeScript type annotations.
  *
  * This rule validates that:
@@ -157,15 +167,18 @@ export default createRule<Options, MessageIds>({
                 });
               }
             } else {
-              // @Type is used with a primitive type
-              context.report({
-                node,
-                messageId: 'typeMismatch',
-                data: {
-                  typeDecoratorClass: typeClassName,
-                  actualType,
-                },
-              });
+              // @Type is used with a primitive type - check if it's a valid wrapper class match
+              const expectedPrimitive = PRIMITIVE_WRAPPER_MAP[typeClassName];
+              if (!expectedPrimitive || expectedPrimitive !== actualType) {
+                context.report({
+                  node,
+                  messageId: 'typeMismatch',
+                  data: {
+                    typeDecoratorClass: typeClassName,
+                    actualType,
+                  },
+                });
+              }
             }
           }
 
@@ -187,17 +200,20 @@ export default createRule<Options, MessageIds>({
                   });
                 }
               } else {
-                // @Type is used with an array of primitives
+                // @Type is used with an array of primitives - check if it's a valid wrapper class match
                 const elementType = getTypeString(elementTypeNode, checker, esTreeNodeMap);
                 if (elementType) {
-                  context.report({
-                    node,
-                    messageId: 'typeMismatch',
-                    data: {
-                      typeDecoratorClass: typeClassName,
-                      actualType: `${elementType}[]`,
-                    },
-                  });
+                  const expectedPrimitive = PRIMITIVE_WRAPPER_MAP[typeClassName];
+                  if (!expectedPrimitive || expectedPrimitive !== elementType) {
+                    context.report({
+                      node,
+                      messageId: 'typeMismatch',
+                      data: {
+                        typeDecoratorClass: typeClassName,
+                        actualType: `${elementType}[]`,
+                      },
+                    });
+                  }
                 }
               }
             }
