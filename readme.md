@@ -18,12 +18,50 @@ yarn add -D eslint-plugin-class-validator-type-match
 
 ## Usage
 
-### Manual Configuration
+### Flat Config (eslint.config.ts)
+
+```typescript
+import classValidatorTypeMatch from 'eslint-plugin-class-validator-type-match';
+
+export default [classValidatorTypeMatch.flatConfigs.recommended];
+```
+
+Or with manual rule configuration:
+
+```typescript
+import classValidatorTypeMatch from 'eslint-plugin-class-validator-type-match';
+
+export default [
+  {
+    plugins: {
+      'class-validator-type-match': classValidatorTypeMatch,
+    },
+    rules: {
+      'class-validator-type-match/decorator-type-match': 'error',
+      'class-validator-type-match/optional-decorator-match': 'error',
+      'class-validator-type-match/validate-nested-match': 'error',
+      'class-validator-type-match/type-decorator-match': 'error',
+      'class-validator-type-match/definite-assignment-match': 'error',
+      'class-validator-type-match/dto-filename-match': 'error',
+    },
+  },
+];
+```
+
+### Legacy Config (.eslintrc)
 
 ```javascript
 // .eslintrc.js
 module.exports = {
-  parser: '@typescript-eslint/parser',
+  extends: ['plugin:class-validator-type-match/recommended'],
+};
+```
+
+Or with manual rule configuration:
+
+```javascript
+// .eslintrc.js
+module.exports = {
   plugins: ['class-validator-type-match'],
   rules: {
     'class-validator-type-match/decorator-type-match': 'error',
@@ -36,29 +74,11 @@ module.exports = {
 };
 ```
 
-### Recommended Configuration
-
-```javascript
-// .eslintrc.js
-module.exports = {
-  parser: '@typescript-eslint/parser',
-  extends: ['plugin:class-validator-type-match/recommended'],
-};
-```
-
 ### Configuration Presets
 
 - **`recommended`** - All rules enabled (best for most projects)
 - **`strict`** - All rules enabled with strict settings
 - **`basic`** - Only core type matching rules (decorator-type-match, optional-decorator-match, definite-assignment-match, dto-filename-match)
-
-```javascript
-// Use basic preset for less strict validation
-module.exports = {
-  parser: '@typescript-eslint/parser',
-  extends: ['plugin:class-validator-type-match/basic'],
-};
-```
 
 ## Rules
 
