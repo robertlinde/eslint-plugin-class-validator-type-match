@@ -32,8 +32,8 @@
     "prepare": "husky"
   },
   "peerDependencies": {
-    "@typescript-eslint/parser": "8.53.0",
-    "eslint": "9.39.2"
+    "@typescript-eslint/parser": "^8.0.0",
+    "eslint": "^9.0.0"
   },
   "dependencies": {
     "@typescript-eslint/utils": "8.53.0"

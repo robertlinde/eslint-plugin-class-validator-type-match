@@ -5,6 +5,10 @@
   "labels": ["renovate"],
   "packageRules": [
     {
+      "matchDepTypes": ["peerDependencies"],
+      "rangeStrategy": "widen"
+    },
+    {
       "matchUpdateTypes": ["minor", "patch", "pin", "digest"],
       "groupName": "all dependencies",
       "semanticCommitType": "chore"
