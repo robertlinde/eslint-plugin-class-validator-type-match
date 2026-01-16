@@ -60,7 +60,7 @@ const legacyConfigs: TSESLint.Linter.Plugin['configs'] = {
 };
 
 // Flat configs for eslint.config.ts (classValidatorTypeMatch.configs.recommended)
-const flatConfigs: TSESLint.FlatConfig.Plugin['configs'] = {
+const flatConfigs = {
   recommended: {
     name: 'class-validator-type-match/recommended',
     plugins: {
@@ -101,7 +101,7 @@ const flatConfigs: TSESLint.FlatConfig.Plugin['configs'] = {
       'class-validator-type-match/dto-filename-match': 'error',
     },
   },
-};
+} satisfies TSESLint.FlatConfig.SharedConfigs;
 
 export = {
   meta: plugin.meta,
