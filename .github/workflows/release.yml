@@ -11,9 +11,10 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write
+      id-token: write
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           fetch-depth: '0'
 
@@ -26,3 +27,26 @@ jobs:
         run: |
           git tag v${{ steps.get_next_version.outputs.version }}
           git push origin v${{ steps.get_next_version.outputs.version }}
+
+      - name: Setup Node.js
+        if: ${{ steps.get_next_version.outputs.hasNextVersion == 'true' }}
+        uses: actions/setup-node@v6
+        with:
+          node-version: '24.13.0'
+          registry-url: 'https://registry.npmjs.org'
+
+      - name: Install dependencies
+        if: ${{ steps.get_next_version.outputs.hasNextVersion == 'true' }}
+        run: npm ci
+
+      - name: Update package.json version
+        if: ${{ steps.get_next_version.outputs.hasNextVersion == 'true' }}
+        run: npm version ${{ steps.get_next_version.outputs.version }} --no-git-tag-version
+
+      - name: Build
+        if: ${{ steps.get_next_version.outputs.hasNextVersion == 'true' }}
+        run: npm run build
+
+      - name: Publish to npm
+        if: ${{ steps.get_next_version.outputs.hasNextVersion == 'true' }}
+        run: npm publish --access public --provenance
