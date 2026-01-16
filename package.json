@@ -16,9 +16,10 @@
     "url": "https://github.com/robertlinde/eslint-plugin-class-validator-type-match"
   },
   "main": "dist/index.js",
-  "types": "dist/index.d.ts",
+  "types": "index.d.ts",
   "files": [
-    "dist"
+    "dist",
+    "index.d.ts"
   ],
   "scripts": {
     "build": "tsc",
