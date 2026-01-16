@@ -1,4 +1,3 @@
-import type {TSESLint} from '@typescript-eslint/utils';
 import decoratorTypeMatch from './rules/decorator-type-match';
 import optionalDecoratorMatch from './rules/optional-decorator-match';
 import validateNestedMatch from './rules/validate-nested-match';
@@ -22,10 +21,10 @@ const plugin = {
     version,
   },
   rules,
-} satisfies TSESLint.FlatConfig.Plugin;
+};
 
 // Legacy configs for .eslintrc (extends: ['plugin:class-validator-type-match/recommended'])
-const legacyConfigs: TSESLint.Linter.Plugin['configs'] = {
+const legacyConfigs = {
   recommended: {
     plugins: ['class-validator-type-match'],
     rules: {
@@ -59,7 +58,7 @@ const legacyConfigs: TSESLint.Linter.Plugin['configs'] = {
   },
 };
 
-// Flat configs for eslint.config.ts (classValidatorTypeMatch.configs.recommended)
+// Flat configs for eslint.config.ts (classValidatorTypeMatch.flatConfigs.recommended)
 const flatConfigs = {
   recommended: {
     name: 'class-validator-type-match/recommended',
@@ -101,7 +100,7 @@ const flatConfigs = {
       'class-validator-type-match/dto-filename-match': 'error',
     },
   },
-} satisfies TSESLint.FlatConfig.SharedConfigs;
+};
 
 export = {
   meta: plugin.meta,
