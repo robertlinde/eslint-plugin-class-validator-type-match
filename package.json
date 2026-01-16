@@ -32,18 +32,18 @@
     "prepare": "husky"
   },
   "peerDependencies": {
-    "@typescript-eslint/parser": "8.46.0",
-    "eslint": "9.37.0"
+    "@typescript-eslint/parser": "8.53.0",
+    "eslint": "9.39.2"
   },
   "dependencies": {
-    "@typescript-eslint/utils": "8.46.0"
+    "@typescript-eslint/utils": "8.53.0"
   },
   "devDependencies": {
     "@commitlint/cli": "20.3.1",
     "@commitlint/config-conventional": "20.3.1",
     "@eslint/js": "9.39.2",
     "@typescript-eslint/parser": "8.53.0",
-    "@typescript-eslint/rule-tester": "8.46.0",
+    "@typescript-eslint/rule-tester": "8.53.0",
     "@vitest/coverage-v8": "4.0.17",
     "eslint": "9.39.2",
     "globals": "16.5.0",
