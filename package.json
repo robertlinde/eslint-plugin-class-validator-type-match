@@ -26,6 +26,9 @@
     "lint": "eslint \"src/**/*.ts\"",
     "lint:fix": "eslint \"src/**/*.ts\" --fix",
     "format": "prettier --write \"**/*.{ts,md}\"",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:coverage": "vitest run --coverage",
     "prepare": "husky"
   },
   "peerDependencies": {
@@ -40,13 +43,16 @@
     "@commitlint/config-conventional": "20.0.0",
     "@eslint/js": "9.37.0",
     "@typescript-eslint/parser": "8.46.0",
+    "@typescript-eslint/rule-tester": "^8.46.0",
+    "@vitest/coverage-v8": "^4.0.17",
     "eslint": "9.37.0",
     "globals": "16.4.0",
     "husky": "9.1.7",
     "lint-staged": "16.2.4",
     "prettier": "3.6.2",
     "typescript": "^5.6.0",
-    "typescript-eslint": "8.46.0"
+    "typescript-eslint": "8.46.0",
+    "vitest": "^4.0.17"
   },
   "engines": {
     "node": ">=16.0.0"
