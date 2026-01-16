@@ -910,6 +910,24 @@ export function hasValidateNestedEachOption(decorator: TSESTree.Decorator): bool
 }
 
 /**
+ * Checks if a type is an object-producing utility type or Record.
+ * These types always produce object types and should be valid with @IsObject.
+ *
+ * Includes: Record, Partial, Required, Pick, Omit, Readonly
+ */
+export function isObjectUtilityType(typeNode: TSESTree.TypeNode): boolean {
+  const unwrapped = unwrapReadonlyOperator(typeNode);
+
+  if (unwrapped.type !== 'TSTypeReference') {
+    return false;
+  }
+
+  const typeName = getTypeReferenceName(unwrapped.typeName);
+  const objectUtilityTypes = ['Record', 'Partial', 'Required', 'Pick', 'Omit', 'Readonly'];
+  return objectUtilityTypes.includes(typeName);
+}
+
+/**
  * Validates if a decorator matches the TypeScript type annotation.
  * Handles special cases like @IsEnum validation, nullable unions, and utility types.
  */
@@ -924,6 +942,11 @@ export function checkTypeMatch(
 
   // Skip decorators not in our map
   if (!expectedTypes || expectedTypes.length === 0) {
+    return true;
+  }
+
+  // Special handling for @IsObject and @IsNotEmptyObject - utility types that produce objects
+  if ((decorator === 'IsObject' || decorator === 'IsNotEmptyObject') && isObjectUtilityType(typeAnnotation)) {
     return true;
   }
 

@@ -175,6 +175,74 @@ ruleTester.run('decorator-type-match', rule, {
         }
       `,
     },
+    // @IsObject with Record<K, V> - Record is an object type
+    {
+      code: `
+        class User {
+          @IsObject()
+          permissions!: Record<string, boolean>;
+        }
+      `,
+    },
+    // @IsNotEmptyObject with Record<K, V>
+    {
+      code: `
+        class User {
+          @IsNotEmptyObject()
+          settings!: Record<string, string>;
+        }
+      `,
+    },
+    // @IsObject with Partial<T>
+    {
+      code: `
+        interface Config { foo: string; bar: number; }
+        class User {
+          @IsObject()
+          config!: Partial<Config>;
+        }
+      `,
+    },
+    // @IsObject with Pick<T, K>
+    {
+      code: `
+        interface User { id: string; name: string; email: string; }
+        class UpdateDto {
+          @IsObject()
+          data!: Pick<User, 'name' | 'email'>;
+        }
+      `,
+    },
+    // @IsObject with Omit<T, K>
+    {
+      code: `
+        interface User { id: string; name: string; password: string; }
+        class PublicUser {
+          @IsObject()
+          user!: Omit<User, 'password'>;
+        }
+      `,
+    },
+    // @IsObject with Required<T>
+    {
+      code: `
+        interface Config { foo?: string; bar?: number; }
+        class User {
+          @IsObject()
+          config!: Required<Config>;
+        }
+      `,
+    },
+    // @IsObject with Readonly<T>
+    {
+      code: `
+        interface Config { foo: string; }
+        class User {
+          @IsObject()
+          config!: Readonly<Config>;
+        }
+      `,
+    },
     // Using Array<T> generic syntax
     {
       code: `
