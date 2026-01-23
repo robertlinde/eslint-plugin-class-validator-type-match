@@ -47,7 +47,7 @@
     "@typescript-eslint/rule-tester": "8.53.1",
     "@vitest/coverage-v8": "4.0.18",
     "eslint": "9.39.2",
-    "globals": "17.0.0",
+    "globals": "17.1.0",
     "husky": "9.1.7",
     "lint-staged": "16.2.7",
     "prettier": "3.8.1",
