@@ -40,8 +40,8 @@
     "@typescript-eslint/utils": "8.54.0"
   },
   "devDependencies": {
-    "@commitlint/cli": "20.4.0",
-    "@commitlint/config-conventional": "20.4.0",
+    "@commitlint/cli": "20.4.1",
+    "@commitlint/config-conventional": "20.4.1",
     "@eslint/js": "9.39.2",
     "@typescript-eslint/parser": "8.54.0",
     "@typescript-eslint/rule-tester": "8.54.0",
