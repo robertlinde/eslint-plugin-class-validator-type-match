@@ -264,6 +264,23 @@ export default createRule<Options, MessageIds>({
     };
 
     /**
+     * Helper: Check if property has @ValidateIf decorator
+     */
+    const hasValidateIfDecorator = (node: TSESTree.PropertyDefinition): boolean => {
+      if (!node.decorators || node.decorators.length === 0) return false;
+
+      return node.decorators.some((decorator) => {
+        const expr = decorator.expression;
+
+        if (expr.type === 'CallExpression' && expr.callee.type === 'Identifier') {
+          return expr.callee.name === 'ValidateIf';
+        }
+
+        return false;
+      });
+    };
+
+    /**
      * Helper: Create fixer to add ? to property
      */
     const createOptionalFixer = (node: TSESTree.PropertyDefinition) => {
@@ -419,7 +436,7 @@ export default createRule<Options, MessageIds>({
         /**
          * Priority 5: Property is optional (?) but missing @IsOptional() decorator
          */
-        if (isOptionalProperty && !hasDecorator) {
+        if (isOptionalProperty && !hasDecorator && !hasValidateIfDecorator(node)) {
           issues.push({
             messageId: 'missingOptionalDecorator',
           });
@@ -429,7 +446,7 @@ export default createRule<Options, MessageIds>({
          * Priority 6: Type includes undefined but missing @IsOptional() and not optional
          * Only check if strictNullChecks is enabled
          */
-        if (strictNullChecks && hasUndefined && !hasDecorator && !isOptionalProperty) {
+        if (strictNullChecks && hasUndefined && !hasDecorator && !isOptionalProperty && !hasValidateIfDecorator(node)) {
           issues.push({
             messageId: 'undefinedUnionWithoutDecorator',
           });

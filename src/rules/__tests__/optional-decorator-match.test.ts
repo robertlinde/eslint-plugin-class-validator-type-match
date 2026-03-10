@@ -102,6 +102,38 @@ ruleTester.run('optional-decorator-match', rule, {
       `,
       options: [{checkDefaultValues: true}],
     },
+    // @ValidateIf on optional property - should not require @IsOptional
+    {
+      code: `
+        class ShiftDto {
+          @ValidateIf((o: ShiftDto) => !o.short)
+          @IsString()
+          @IsNotEmpty()
+          name?: string;
+        }
+      `,
+    },
+    // @ValidateIf on property with undefined union - should not require @IsOptional
+    {
+      code: `
+        class ShiftDto {
+          @ValidateIf((o: ShiftDto) => !o.short)
+          @IsString()
+          name: string | undefined;
+        }
+      `,
+    },
+    // @ValidateIf combined with @IsOptional - both present is valid
+    {
+      code: `
+        class ShiftDto {
+          @ValidateIf((o: ShiftDto) => !o.short)
+          @IsOptional()
+          @IsString()
+          name?: string;
+        }
+      `,
+    },
   ],
   invalid: [
     // Optional property missing @IsOptional
