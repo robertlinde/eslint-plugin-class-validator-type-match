@@ -37,23 +37,23 @@
     "eslint": "^9.0.0"
   },
   "dependencies": {
-    "@typescript-eslint/utils": "8.60.0"
+    "@typescript-eslint/utils": "8.60.1"
   },
   "devDependencies": {
     "@commitlint/cli": "21.0.2",
     "@commitlint/config-conventional": "21.0.2",
     "@eslint/js": "9.39.4",
-    "@typescript-eslint/parser": "8.60.0",
-    "@typescript-eslint/rule-tester": "8.60.0",
-    "@vitest/coverage-v8": "4.1.7",
+    "@typescript-eslint/parser": "8.60.1",
+    "@typescript-eslint/rule-tester": "8.60.1",
+    "@vitest/coverage-v8": "4.1.8",
     "eslint": "9.39.4",
     "globals": "17.6.0",
     "husky": "9.1.7",
     "lint-staged": "17.0.7",
     "prettier": "3.8.3",
     "typescript": "5.9.3",
-    "typescript-eslint": "8.60.0",
-    "vitest": "4.1.7"
+    "typescript-eslint": "8.60.1",
+    "vitest": "4.1.8"
   },
   "engines": {
     "node": "25.9.0"
