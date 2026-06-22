@@ -42,11 +42,11 @@
   "devDependencies": {
     "@commitlint/cli": "21.0.2",
     "@commitlint/config-conventional": "21.0.2",
-    "@eslint/js": "^10.0.1",
+    "@eslint/js": "10.0.1",
     "@typescript-eslint/parser": "8.62.0",
     "@typescript-eslint/rule-tester": "8.62.0",
     "@vitest/coverage-v8": "4.1.9",
-    "eslint": "^10.5.0",
+    "eslint": "10.5.0",
     "globals": "17.7.0",
     "husky": "9.1.7",
     "lint-staged": "17.0.8",
@@ -56,6 +56,6 @@
     "vitest": "4.1.9"
   },
   "engines": {
-    "node": ">=20"
+    "node": "v26.3.1"
   }
 }
