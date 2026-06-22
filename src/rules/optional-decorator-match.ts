@@ -301,8 +301,7 @@ export default createRule<Options, MessageIds>({
         const typeNode = node.typeAnnotation.typeAnnotation;
         if (typeNode.type !== 'TSUnionType') return null;
 
-        const sourceCode = context.getSourceCode();
-        const typeText = sourceCode.getText(typeNode);
+        const typeText = context.sourceCode.getText(typeNode);
 
         // Remove | undefined or undefined | from the union
         const fixedType = typeText
