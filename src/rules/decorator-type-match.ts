@@ -134,14 +134,13 @@ export default createRule<Options, MessageIds>({
           .filter((name): name is string => name !== null);
 
         const {typeAnnotation} = node.typeAnnotation;
-        let actualType: string | null = null;
 
         /**
          * Determine the actual TypeScript type from the annotation.
          * Supports primitive types, arrays, type references, literals, and intersections.
          * Uses TypeScript's type checker when available to resolve type aliases.
          */
-        actualType = getTypeString(typeAnnotation, checker, esTreeNodeMap);
+        const actualType: string | null = getTypeString(typeAnnotation, checker, esTreeNodeMap);
 
         // Skip if we couldn't determine the type
         if (!actualType) return;
