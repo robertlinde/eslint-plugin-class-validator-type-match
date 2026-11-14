@@ -12,14 +12,14 @@ jobs:
       contents: read
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v7.0.0
+        uses: actions/checkout@v7.0.1
         with:
           fetch-depth: 0
 
       - name: Setup Node.js
-        uses: actions/setup-node@v7.0.0
+        uses: actions/setup-node@v7.1.0
         with:
-          node-version: 26.12.1
+          node-version: 26.13.1
 
       - name: Install dependencies
         run: npm install --save-dev @commitlint/config-conventional @commitlint/cli
@@ -37,7 +37,7 @@ jobs:
       pull-requests: read
     steps:
       - name: Lint PR Title
-        uses: amannn/action-semantic-pull-request@v6.1.1
+        uses: amannn/action-semantic-pull-request@v6.1.2
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
